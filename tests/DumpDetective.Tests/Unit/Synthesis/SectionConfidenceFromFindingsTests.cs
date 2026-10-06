@@ -154,7 +154,7 @@ public sealed class SectionConfidenceFromFindingsTests
     }
 
     private static InsightFinding MakeFinding(string title, double? score, IReadOnlyList<string> limitingFactors) =>
-        new("String Analysis", "Memory", FindingSeverity.Info, title, "evidence", "recommendation", [], ConfidenceScore: score)
+        new("String Analysis", "Memory", Severity.Info, title, "evidence", "recommendation", [], ConfidenceScore: score)
         {
             ConfidenceLimitingFactors = limitingFactors,
         };

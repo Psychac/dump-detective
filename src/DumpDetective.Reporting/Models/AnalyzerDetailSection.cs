@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -246,7 +247,7 @@ internal sealed record AnalyzerDetailSection(
     IReadOnlyList<SectionBlock> Blocks,      // Narrative prose: TextBlock, ConfidenceBand, H headings only
     string SectionId = "",                   // Stable anchor e.g. "A1", "B4" — set by ReportSerializer via SectionIdDomainMap
     string Domain = "",                      // "Memory" | "GC" | "Leaks" | "Threads" | "Async" | "Exceptions" | "Runtime" | "TypeSystem"
-    FindingSeverity? LeadSeverity = null,    // Severity of the lead finding (null = informational only)
+    Severity? LeadSeverity = null,    // Severity of the lead finding (null = informational only)
     SectionLeadFinding? LeadFinding = null,  // Always-visible top finding — null when section has no findings
     IReadOnlyDictionary<string, MetricValue>? KeyMetrics = null, // Always-visible metric strip (map: snake_case -> value)
     // Legacy typed tables removed: producers should populate `CompactTables` only.

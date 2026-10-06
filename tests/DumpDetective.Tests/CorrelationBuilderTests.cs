@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Linq;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Models;
@@ -32,8 +33,8 @@ namespace DumpDetective.Tests
         [Fact]
         public void BuildFrom_FindsCooccurrenceEvent()
         {
-            var findingA = new InsightFinding("AnalyzerA", "Cat", FindingSeverity.Warning, "TitleA", "E", "R", new[] { "regression" }, "fpA", 1.0, "u", 0.8, null);
-            var findingB = new InsightFinding("AnalyzerB", "Cat", FindingSeverity.Warning, "TitleB", "E", "R", new[] { "regression" }, "fpB", 2.0, "u", 0.7, null);
+            var findingA = new InsightFinding("AnalyzerA", "Cat", Severity.Warning, "TitleA", "E", "R", new[] { "regression" }, "fpA", 1.0, "u", 0.8, null);
+            var findingB = new InsightFinding("AnalyzerB", "Cat", Severity.Warning, "TitleB", "E", "R", new[] { "regression" }, "fpB", 2.0, "u", 0.7, null);
 
             var snapshot = new AnalysisSnapshot(0, "dumpA", new AnalyzerRunResult[0], new[] { findingA, findingB }, new System.Collections.Generic.Dictionary<string, AnalyzerDomainResult>(System.StringComparer.Ordinal), System.DateTime.UtcNow, null);
 

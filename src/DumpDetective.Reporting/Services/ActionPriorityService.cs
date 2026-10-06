@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Reporting.Models;
 
@@ -191,9 +192,9 @@ internal static class ActionPriorityService
 
     private static int SeverityWeight(string severity) => severity switch
     {
-        nameof(FindingSeverity.Critical) => 50,
-        nameof(FindingSeverity.Warning) => 30,
-        nameof(FindingSeverity.Info) => 10,
+        nameof(Severity.Critical) => 50,
+        nameof(Severity.Warning) => 30,
+        nameof(Severity.Info) => 10,
         _ => 6
     };
 
@@ -225,9 +226,9 @@ internal static class ActionPriorityService
 
     private static int TimeToMitigateWeight(FindingRecord finding)
     {
-        if (finding.Severity == nameof(FindingSeverity.Info)) return 14;
-        if (finding.Severity == nameof(FindingSeverity.Warning)) return 10;
-        if (finding.Severity == nameof(FindingSeverity.Critical)) return 6;
+        if (finding.Severity == nameof(Severity.Info)) return 14;
+        if (finding.Severity == nameof(Severity.Warning)) return 10;
+        if (finding.Severity == nameof(Severity.Critical)) return 6;
         return 9;
     }
 
@@ -359,7 +360,7 @@ internal static class ActionPriorityService
                 " across " + distinctAnalyzers + " analyzer" + (distinctAnalyzers == 1 ? "" : "s") + ".";
         }
 
-        if (finding.Severity == nameof(FindingSeverity.Critical) && confidence.Composite < 0.45)
+        if (finding.Severity == nameof(Severity.Critical) && confidence.Composite < 0.45)
             text += " Confidence is low; verify root-cause evidence before broad remediation.";
 
         return text;
@@ -369,7 +370,7 @@ internal static class ActionPriorityService
     {
         string expectedDirection = ResolveExpectedDirection(finding);
 
-        if (finding.Severity == nameof(FindingSeverity.Critical) && confidence.Composite < 0.45)
+        if (finding.Severity == nameof(Severity.Critical) && confidence.Composite < 0.45)
             return "Re-check evidence path and confirm with a second analyzer signal before rollout. Expected trend: " + expectedDirection;
 
         return "Re-run analysis and confirm improvement. Expected trend: " + expectedDirection;

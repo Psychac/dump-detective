@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Linq;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Models;
@@ -15,8 +16,8 @@ namespace DumpDetective.Tests
         public void BuildFrom_AppliesTimelineBoost()
         {
             // AnalyzerA shows strong metric jump at snapshot 1
-            var findingA = new InsightFinding("AnalyzerA", "Cat", FindingSeverity.Warning, "TitleA", "E", "R", new[] { "regression" }, "fpA", 1.0, "u", 0.8, null);
-            var findingB = new InsightFinding("AnalyzerB", "Cat", FindingSeverity.Warning, "TitleB", "E", "R", new[] { "regression" }, "fpB", 1.0, "u", 0.7, null);
+            var findingA = new InsightFinding("AnalyzerA", "Cat", Severity.Warning, "TitleA", "E", "R", new[] { "regression" }, "fpA", 1.0, "u", 0.8, null);
+            var findingB = new InsightFinding("AnalyzerB", "Cat", Severity.Warning, "TitleB", "E", "R", new[] { "regression" }, "fpB", 1.0, "u", 0.7, null);
 
             var snap0 = new AnalysisSnapshot(0, "dump0", new AnalyzerRunResult[0], new[] { findingA }, new System.Collections.Generic.Dictionary<string, AnalyzerDomainResult>(System.StringComparer.Ordinal), System.DateTime.UtcNow, null);
             var snap1 = new AnalysisSnapshot(1, "dump1", new AnalyzerRunResult[0], new[] { findingA, findingB }, new System.Collections.Generic.Dictionary<string, AnalyzerDomainResult>(System.StringComparer.Ordinal), System.DateTime.UtcNow, null);

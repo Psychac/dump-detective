@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Collections.Generic;
 
 using DumpDetective.Core.Enums;
@@ -18,7 +19,7 @@ namespace DumpDetective.Tests.Unit.Reporting;
 /// </summary>
 public sealed class FindingLifecycleComparerTests
 {
-    private static InsightFinding MakeFinding(string fingerprint, FindingSeverity severity) =>
+    private static InsightFinding MakeFinding(string fingerprint, Severity severity) =>
         new(
             Analyzer: "TestAnalyzer",
             Category: "Cat",
@@ -35,10 +36,10 @@ public sealed class FindingLifecycleComparerTests
     [Fact]
     public void Compare_ClassifiesByFingerprintPresence()
     {
-        InsightFinding onlyInBaseline = MakeFinding("resolved-one", FindingSeverity.Warning);
-        InsightFinding unchanged = MakeFinding("persistent-one", FindingSeverity.Warning);
+        InsightFinding onlyInBaseline = MakeFinding("resolved-one", Severity.Warning);
+        InsightFinding unchanged = MakeFinding("persistent-one", Severity.Warning);
         InsightFinding onlyInCurrentBaselineVersion = unchanged;
-        InsightFinding onlyInCurrent = MakeFinding("new-one", FindingSeverity.Critical);
+        InsightFinding onlyInCurrent = MakeFinding("new-one", Severity.Critical);
 
         AnalysisSnapshot baseline = MakeSnapshot(0, onlyInBaseline, onlyInCurrentBaselineVersion);
         AnalysisSnapshot current = MakeSnapshot(1, unchanged, onlyInCurrent);
@@ -53,22 +54,22 @@ public sealed class FindingLifecycleComparerTests
     [Fact]
     public void Compare_RecordsSeverityChange_OnEscalation()
     {
-        AnalysisSnapshot baseline = MakeSnapshot(0, MakeFinding("fp", FindingSeverity.Warning));
-        AnalysisSnapshot current = MakeSnapshot(1, MakeFinding("fp", FindingSeverity.Critical));
+        AnalysisSnapshot baseline = MakeSnapshot(0, MakeFinding("fp", Severity.Warning));
+        AnalysisSnapshot current = MakeSnapshot(1, MakeFinding("fp", Severity.Critical));
 
         FindingLifecycleResult result = FindingLifecycleComparer.Compare(baseline, current);
 
         FindingSeverityChange change = result.SeverityChanges.Should().ContainSingle().Subject;
-        change.BaselineSeverity.Should().Be(FindingSeverity.Warning);
-        change.Current.Severity.Should().Be(FindingSeverity.Critical);
+        change.BaselineSeverity.Should().Be(Severity.Warning);
+        change.Current.Severity.Should().Be(Severity.Critical);
         change.IsEscalation.Should().BeTrue();
     }
 
     [Fact]
     public void Compare_RecordsSeverityChange_OnDeescalation_ButNotAsEscalation()
     {
-        AnalysisSnapshot baseline = MakeSnapshot(0, MakeFinding("fp", FindingSeverity.Critical));
-        AnalysisSnapshot current = MakeSnapshot(1, MakeFinding("fp", FindingSeverity.Info));
+        AnalysisSnapshot baseline = MakeSnapshot(0, MakeFinding("fp", Severity.Critical));
+        AnalysisSnapshot current = MakeSnapshot(1, MakeFinding("fp", Severity.Info));
 
         FindingLifecycleResult result = FindingLifecycleComparer.Compare(baseline, current);
 
@@ -79,8 +80,8 @@ public sealed class FindingLifecycleComparerTests
     [Fact]
     public void Compare_NoSeverityChange_WhenPersistentFindingUnchanged()
     {
-        AnalysisSnapshot baseline = MakeSnapshot(0, MakeFinding("fp", FindingSeverity.Warning));
-        AnalysisSnapshot current = MakeSnapshot(1, MakeFinding("fp", FindingSeverity.Warning));
+        AnalysisSnapshot baseline = MakeSnapshot(0, MakeFinding("fp", Severity.Warning));
+        AnalysisSnapshot current = MakeSnapshot(1, MakeFinding("fp", Severity.Warning));
 
         FindingLifecycleResult result = FindingLifecycleComparer.Compare(baseline, current);
 
@@ -91,8 +92,8 @@ public sealed class FindingLifecycleComparerTests
     [Fact]
     public void Compare_NoSeverityChange_ForNewOrResolvedFindings()
     {
-        AnalysisSnapshot baseline = MakeSnapshot(0, MakeFinding("resolved", FindingSeverity.Critical));
-        AnalysisSnapshot current = MakeSnapshot(1, MakeFinding("new", FindingSeverity.Critical));
+        AnalysisSnapshot baseline = MakeSnapshot(0, MakeFinding("resolved", Severity.Critical));
+        AnalysisSnapshot current = MakeSnapshot(1, MakeFinding("new", Severity.Critical));
 
         FindingLifecycleResult result = FindingLifecycleComparer.Compare(baseline, current);
 

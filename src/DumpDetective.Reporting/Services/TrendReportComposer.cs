@@ -1,5 +1,6 @@
 namespace DumpDetective.Reporting.Services;
 
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 using System.Linq;
@@ -215,9 +216,9 @@ internal sealed class TrendReportComposer(
                 Category: "Comparison",
                 Severity: delta.Severity switch
                 {
-                    RegressionSeverity.Severe => FindingSeverity.Critical,
-                    RegressionSeverity.Moderate => FindingSeverity.Warning,
-                    _ => FindingSeverity.Info
+                    RegressionSeverity.Severe => Severity.Critical,
+                    RegressionSeverity.Moderate => Severity.Warning,
+                    _ => Severity.Info
                 },
                 Title: $"Trend regression: {analyzerName} / {delta.Key}{scopeSuffix}",
                 Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
@@ -255,7 +256,7 @@ internal sealed class TrendReportComposer(
             findings.Add(new InsightFinding(
                 Analyzer: "TrendAnalyzer",
                 Category: "Comparison",
-                Severity: FindingSeverity.Info,
+                Severity: Severity.Info,
                 Title: $"Trend improvement: {analyzerName} / {delta.Key}{scopeSuffix}",
                 Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
                 Recommendation: "Validate this improvement is stable across subsequent snapshots before closing related investigations.",
@@ -272,10 +273,10 @@ internal sealed class TrendReportComposer(
         FindingLifecycleResult lifecycle)
     {
         int topRegressions = overall.Sum(r => r.Regressions.Count);
-        FindingSeverity regressionSeverity = topRegressions >= 5 ? FindingSeverity.Warning : FindingSeverity.Info;
+        Severity regressionSeverity = topRegressions >= 5 ? Severity.Warning : Severity.Info;
 
-        FindingSeverity lifecycleSeverity = lifecycle.NewFindings.Count == 0
-            ? FindingSeverity.Info
+        Severity lifecycleSeverity = lifecycle.NewFindings.Count == 0
+            ? Severity.Info
             : lifecycle.NewFindings.Select(f => f.Severity).OrderByDescending(s => s).First();
 
         return new List<InsightFinding>
@@ -362,8 +363,8 @@ internal sealed class TrendReportComposer(
 
     private static int SeverityOrdinal(string severity) => severity switch
     {
-        nameof(FindingSeverity.Critical) => 2,
-        nameof(FindingSeverity.Warning) => 1,
+        nameof(Severity.Critical) => 2,
+        nameof(Severity.Warning) => 1,
         _ => 0
     };
 

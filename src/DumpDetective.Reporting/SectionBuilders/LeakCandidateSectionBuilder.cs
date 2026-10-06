@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
@@ -117,7 +118,7 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
             string lohImpact = candidate.TotalSize > 85_000 && IsLargeObjectLike(candidate.TypeName)
                 ? "Potential LOH fragmentation risk due to large array/string-like allocations."
                 : "No LOH-specific fragmentation note.";
-            string explanationText = assessments[candidate].Severity != FindingSeverity.Info
+            string explanationText = assessments[candidate].Severity != Severity.Info
                 ? LeakExplainer.Explain(candidate, assessments[candidate])
                 : string.Empty;
 

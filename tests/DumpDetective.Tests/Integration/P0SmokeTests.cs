@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
@@ -38,7 +39,7 @@ public sealed class P0SmokeTests
     new ReportSerializer(),
     new TrendReportComposer(new ReportSerializer()));
 
-    private static AnalyzerRunResult MakeRun(string name, FindingSeverity sev, string title, AnalyzerExecutionStatus status = AnalyzerExecutionStatus.Success)
+    private static AnalyzerRunResult MakeRun(string name, Severity sev, string title, AnalyzerExecutionStatus status = AnalyzerExecutionStatus.Success)
     {
         InsightFinding f = new(
             Analyzer: name,
@@ -72,7 +73,7 @@ public sealed class P0SmokeTests
     [Fact]
     public void P0_1_HtmlReport_EmbeddedJsonMatchesRenderedDocument()
     {
-        AnalyzerRunResult run = MakeRun("LeakAnalyzer", FindingSeverity.Critical, "BigLeak");
+        AnalyzerRunResult run = MakeRun("LeakAnalyzer", Severity.Critical, "BigLeak");
 
         // Get the canonical document first via the ReportSerializer
         ReportSerializer serializer = new();
@@ -119,9 +120,9 @@ public sealed class P0SmokeTests
     [Fact]
     public void P0_3_ReportDocument_PopulatesAppendix()
     {
-        AnalyzerRunResult run1 = MakeRun("LeakAnalyzer", FindingSeverity.Critical, "Leak1");
-        AnalyzerRunResult run2 = MakeRun("ThreadAnalyzer", FindingSeverity.Warning, "ThreadBlock");
-        AnalyzerRunResult run3 = MakeRun("FailedAnalyzer", FindingSeverity.Info, "NotUsed", AnalyzerExecutionStatus.Failed);
+        AnalyzerRunResult run1 = MakeRun("LeakAnalyzer", Severity.Critical, "Leak1");
+        AnalyzerRunResult run2 = MakeRun("ThreadAnalyzer", Severity.Warning, "ThreadBlock");
+        AnalyzerRunResult run3 = MakeRun("FailedAnalyzer", Severity.Info, "NotUsed", AnalyzerExecutionStatus.Failed);
 
         ReportSerializer serializer = new();
         AnalysisReportDocument doc = serializer.Serialize(
@@ -146,7 +147,7 @@ public sealed class P0SmokeTests
     [Fact]
     public void P0_3_AnalyzerRunStatusRecord_SerializesAndDeserializes()
     {
-        AnalyzerRunResult run = MakeRun("LeakAnalyzer", FindingSeverity.Critical, "Leak");
+        AnalyzerRunResult run = MakeRun("LeakAnalyzer", Severity.Critical, "Leak");
         ReportSerializer serializer = new();
         AnalysisReportDocument doc = serializer.Serialize(
             "C:/dumps/smoke.dmp",
@@ -169,8 +170,8 @@ public sealed class P0SmokeTests
     [Fact]
     public void P0_3_HtmlReport_ContainsAnalyzerStatusData()
     {
-        AnalyzerRunResult run1 = MakeRun("LeakAnalyzer", FindingSeverity.Critical, "Leak1");
-        AnalyzerRunResult run2 = MakeRun("FailedAnalyzer", FindingSeverity.Info, "X", AnalyzerExecutionStatus.Failed);
+        AnalyzerRunResult run1 = MakeRun("LeakAnalyzer", Severity.Critical, "Leak1");
+        AnalyzerRunResult run2 = MakeRun("FailedAnalyzer", Severity.Info, "X", AnalyzerExecutionStatus.Failed);
 
         ReportSerializer serializer = new();
         AnalysisReportDocument doc = serializer.Serialize(
@@ -205,14 +206,14 @@ public sealed class P0SmokeTests
         InsightFinding finding = new(
             Analyzer: "LeakAnalyzer",
             Category: "Leaks",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Potential leak in ServiceProvider",
             Evidence: "50MB retained",
             Recommendation: "Investigate retention path",
             Tags: ["leaks"],
             Fingerprint: "leak-sp-1");
 
-        AnalyzerRunResult run = MakeRun("LeakAnalyzer", FindingSeverity.Warning, "Potential leak");
+        AnalyzerRunResult run = MakeRun("LeakAnalyzer", Severity.Warning, "Potential leak");
 
         AnalysisSnapshot baseline = new(
             Index: 0, DumpPath: "C:/dumps/baseline.dmp", Runs: [run],

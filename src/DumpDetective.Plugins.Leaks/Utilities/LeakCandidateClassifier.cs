@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -6,7 +7,7 @@ namespace DumpDetective.Analysis.Utilities;
 
 internal readonly record struct LeakCandidateAssessment(
     int SuspicionScore,
-    FindingSeverity Severity,
+    Severity Severity,
     LeakClass Classification,
     string? RootKind);
 
@@ -155,10 +156,10 @@ internal static class LeakCandidateClassifier
         return score;
     }
 
-    private static FindingSeverity GetSeverity(int score)
+    private static Severity GetSeverity(int score)
         => score >= 90
-            ? FindingSeverity.Critical
+            ? Severity.Critical
             : score >= 70
-                ? FindingSeverity.Warning
-                : FindingSeverity.Info;
+                ? Severity.Warning
+                : Severity.Info;
 }

@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
@@ -37,19 +38,19 @@ internal static class HealthScorecardBuilder
                 acc.FindingCount++;
                 switch (finding.Severity)
                 {
-                    case FindingSeverity.Critical:
+                    case Severity.Critical:
                         acc.CriticalCount++;
-                        if (acc.MaxSeverity < FindingSeverity.Critical)
-                            acc.MaxSeverity = FindingSeverity.Critical;
+                        if (acc.MaxSeverity < Severity.Critical)
+                            acc.MaxSeverity = Severity.Critical;
                         break;
-                    case FindingSeverity.Warning:
+                    case Severity.Warning:
                         acc.WarningCount++;
-                        if (acc.MaxSeverity < FindingSeverity.Warning)
-                            acc.MaxSeverity = FindingSeverity.Warning;
+                        if (acc.MaxSeverity < Severity.Warning)
+                            acc.MaxSeverity = Severity.Warning;
                         break;
                     default:
-                        if (acc.MaxSeverity < FindingSeverity.Info)
-                            acc.MaxSeverity = FindingSeverity.Info;
+                        if (acc.MaxSeverity < Severity.Info)
+                            acc.MaxSeverity = Severity.Info;
                         break;
                 }
             }
@@ -84,20 +85,20 @@ internal static class HealthScorecardBuilder
         return new HealthScorecard(domains, overallSeverity);
     }
 
-    private static DomainSeverity FindingSeverityToDomain(FindingSeverity maxSev, int findingCount)
+    private static DomainSeverity FindingSeverityToDomain(Severity maxSev, int findingCount)
     {
         if (findingCount == 0) return DomainSeverity.OK;
         return maxSev switch
         {
-            FindingSeverity.Critical => DomainSeverity.Critical,
-            FindingSeverity.Warning  => DomainSeverity.Warning,
+            Severity.Critical => DomainSeverity.Critical,
+            Severity.Warning  => DomainSeverity.Warning,
             _                        => DomainSeverity.OK,
         };
     }
 
     private sealed class DomainAccumulator
     {
-        public FindingSeverity MaxSeverity = FindingSeverity.Info;
+        public Severity MaxSeverity = Severity.Info;
         public int FindingCount;
         public int CriticalCount;
         public int WarningCount;

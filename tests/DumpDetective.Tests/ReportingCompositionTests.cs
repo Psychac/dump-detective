@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Models;
@@ -23,7 +24,7 @@ public sealed class ReportingCompositionTests
         InsightFinding findingA = new(
             Analyzer: "DominatorAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Duplicate strings detected",
             Evidence: "Evidence A",
             Recommendation: "Recommendation A",
@@ -33,7 +34,7 @@ public sealed class ReportingCompositionTests
         InsightFinding findingB = new(
             Analyzer: "DominatorAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Critical,
+            Severity: Severity.Critical,
             Title: "Duplicate strings detected",
             Evidence: "Evidence B",
             Recommendation: "Recommendation B",
@@ -62,7 +63,7 @@ public sealed class ReportingCompositionTests
         InsightFinding leakA = new(
             Analyzer: "DominatorAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Critical,
+            Severity: Severity.Critical,
             Title: "Event handler retention pressure",
             Evidence: "Subscribers retain roots.",
             Recommendation: "Detach leaked handlers and re-check retention.",
@@ -72,7 +73,7 @@ public sealed class ReportingCompositionTests
         InsightFinding leakB = new(
             Analyzer: "DominatorAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Event handler retention pressure",
             Evidence: "Duplicate retention pattern in related type.",
             Recommendation: "Detach leaked handlers and re-check retention.",
@@ -82,7 +83,7 @@ public sealed class ReportingCompositionTests
         InsightFinding threadFinding = new(
             Analyzer: "ThreadAnalyzer",
             Category: "Thread",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Blocked worker thread hotspot",
             Evidence: "Multiple workers blocked on lock.",
             Recommendation: "Inspect lock ownership and reduce contention.",
@@ -120,7 +121,7 @@ public sealed class ReportingCompositionTests
                     Id: "sec-1",
                     Analyzer: "CrashAnalyzer",
                     Category: "Crash",
-                    Severity: FindingSeverity.Warning.ToString(),
+                    Severity: Severity.Warning.ToString(),
                     Title: "Crash signature",
                     Details: ["Unhandled exception in worker"],
                     Recommendation: "Inspect stack and exception roots",
@@ -129,7 +130,7 @@ public sealed class ReportingCompositionTests
                     Id: "sec-2",
                     Analyzer: "ThreadAnalyzer",
                     Category: "Threads",
-                    Severity: FindingSeverity.Info.ToString(),
+                    Severity: Severity.Info.ToString(),
                     Title: "Thread pool pressure",
                     Details: ["LongValue_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"],
                     Recommendation: "Review queued work items",
@@ -176,7 +177,7 @@ public sealed class ReportingCompositionTests
         InsightFinding finding = new(
             Analyzer: "CrashAnalyzer",
             Category: "Crash",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Contract versioning",
             Evidence: "Version metadata should be stamped.",
             Recommendation: "Keep schema changes backward-compatible.",
@@ -224,7 +225,7 @@ public sealed class ReportingCompositionTests
         InsightFinding regularFinding = new(
             Analyzer: "MemoryAnalyzer",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Regular finding",
             Evidence: "Regular evidence",
             Recommendation: "Regular recommendation",
@@ -234,7 +235,7 @@ public sealed class ReportingCompositionTests
         InsightFinding insightFinding = new(
             Analyzer: "InsightEngine",
             Category: "CrossDomain",
-            Severity: FindingSeverity.Critical,
+            Severity: Severity.Critical,
             Title: "Cross-domain correlation",
             Evidence: "Insight evidence",
             Recommendation: "Insight recommendation",
@@ -291,7 +292,7 @@ public sealed class ReportingCompositionTests
         InsightFinding insightFinding = new(
             Analyzer: "InsightEngine",
             Category: "Performance",
-            Severity: FindingSeverity.Info,
+            Severity: Severity.Info,
             Title: "Module with heavy active JIT stack presence also flagged by module analysis",
             Evidence: "Module 'MyApp.Plugins.dll' accounts for 200 active JIT stack frames.",
             Recommendation: "Correlate module size/version-conflict status with the JIT stack heatmap.",
@@ -427,7 +428,7 @@ public sealed class ReportingCompositionTests
         InsightFinding memoryFinding = new(
             Analyzer: "Memory Analysis",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Memory pressure",
             Evidence: "Heap pressure observed",
             Recommendation: "Investigate retention",
@@ -437,7 +438,7 @@ public sealed class ReportingCompositionTests
         InsightFinding threadFinding = new(
             Analyzer: "Thread Analysis",
             Category: "Threads",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Thread contention",
             Evidence: "Blocked threads observed",
             Recommendation: "Inspect lock owners",
@@ -475,7 +476,7 @@ public sealed class ReportingCompositionTests
         InsightFinding analyzerSignal = new(
             Analyzer: "Dominator Analysis",
             Category: "Retention",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Retention hotspot",
             Evidence: "Large retained graph detected",
             Recommendation: "Inspect root paths",
@@ -485,7 +486,7 @@ public sealed class ReportingCompositionTests
         InsightFinding confidenceInfo = new(
             Analyzer: "GC Root Analysis",
             Category: "Confidence",
-            Severity: FindingSeverity.Info,
+            Severity: Severity.Info,
             Title: "Root path search capped (10 paths truncated)",
             Evidence: "Traversal budget capped some paths.",
             Recommendation: "Treat as indicative only.",
@@ -495,7 +496,7 @@ public sealed class ReportingCompositionTests
         InsightFinding diagnosticsInfo = new(
             Analyzer: "Dominator Analysis",
             Category: "Diagnostics",
-            Severity: FindingSeverity.Info,
+            Severity: Severity.Info,
             Title: "Reference tracking was capped",
             Evidence: "Tracking limit reached.",
             Recommendation: "Increase tracking caps.",
@@ -535,7 +536,7 @@ public sealed class ReportingCompositionTests
         InsightFinding warningA = new(
             Analyzer: "DominatorAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Retention risk alpha",
             Evidence: "Growing retained graph",
             Recommendation: "Break retention chain",
@@ -545,7 +546,7 @@ public sealed class ReportingCompositionTests
         InsightFinding warningB = new(
             Analyzer: "DominatorAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Retention risk beta",
             Evidence: "Growing retained graph",
             Recommendation: "Break retention chain",
@@ -587,7 +588,7 @@ public sealed class ReportingCompositionTests
         InsightFinding warning = new(
             Analyzer: "DominatorAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Retention risk",
             Evidence: "Growing retained graph",
             Recommendation: "Break retention chain",
@@ -612,7 +613,7 @@ public sealed class ReportingCompositionTests
         InsightFinding f1 = new(
             Analyzer: "MemoryAnalyzer",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Retention trend alpha",
             Evidence: "retained objects increasing",
             Recommendation: "inspect retention roots",
@@ -622,7 +623,7 @@ public sealed class ReportingCompositionTests
         InsightFinding f2 = new(
             Analyzer: "ThreadAnalyzer",
             Category: "Threads",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Worker saturation beta",
             Evidence: "queue latency increasing",
             Recommendation: "inspect scheduler pressure",
@@ -632,7 +633,7 @@ public sealed class ReportingCompositionTests
         InsightFinding f3 = new(
             Analyzer: "RuntimeAnalyzer",
             Category: "Runtime",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Timeout pressure gamma",
             Evidence: "timeouts align with queue pressure",
             Recommendation: "inspect timeout source",
@@ -680,7 +681,7 @@ public sealed class ReportingCompositionTests
         InsightFinding critical = new(
             Analyzer: "CrashAnalyzer",
             Category: "Crash",
-            Severity: FindingSeverity.Critical,
+            Severity: Severity.Critical,
             Title: "Intermittent crash signature",
             Evidence: "Partial dump evidence",
             Recommendation: "Guard failing call path",
@@ -711,7 +712,7 @@ public sealed class ReportingCompositionTests
         InsightFinding warning = new(
             Analyzer: "DominatorAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Heuristic retention signature",
             Evidence: "Approximate object growth estimate",
             Recommendation: "Verify retained roots before cleanup",
@@ -739,7 +740,7 @@ public sealed class ReportingCompositionTests
         InsightFinding memory = new(
             Analyzer: "MemoryAnalyzer",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Pinned object increase",
             Evidence: "Pinned segment occupancy rising",
             Recommendation: "Review pinning usage",
@@ -749,7 +750,7 @@ public sealed class ReportingCompositionTests
         InsightFinding threads = new(
             Analyzer: "ThreadAnalyzer",
             Category: "Threads",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Worker starvation pattern",
             Evidence: "Thread pool starvation observed",
             Recommendation: "Tune worker scheduling",
@@ -777,7 +778,7 @@ public sealed class ReportingCompositionTests
         InsightFinding memory = new(
             Analyzer: "MemoryAnalyzer",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Request latency and retention increase",
             Evidence: "Latency increase observed with shared metric key",
             Recommendation: "Correlate with thread pressure",
@@ -787,7 +788,7 @@ public sealed class ReportingCompositionTests
         InsightFinding threads = new(
             Analyzer: "ThreadAnalyzer",
             Category: "Threads",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Request latency and thread pool saturation",
             Evidence: "Latency increase observed with shared metric key",
             Recommendation: "Correlate with retention pressure",
@@ -818,7 +819,7 @@ public sealed class ReportingCompositionTests
         InsightFinding memory = new(
             Analyzer: "MemoryAnalyzer",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Latency bridge signal in memory path",
             Evidence: "Retention pressure aligns with latency increase",
             Recommendation: "Inspect retention path",
@@ -828,7 +829,7 @@ public sealed class ReportingCompositionTests
         InsightFinding threads = new(
             Analyzer: "ThreadAnalyzer",
             Category: "Threads",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Latency bridge signal in thread pool",
             Evidence: "Scheduling pressure aligns with latency increase",
             Recommendation: "Inspect pool saturation",
@@ -838,7 +839,7 @@ public sealed class ReportingCompositionTests
         InsightFinding runtime = new(
             Analyzer: "RuntimeAnalyzer",
             Category: "Runtime",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Timeout bridge signal in runtime",
             Evidence: "Connection timeout pattern aligns with pressure",
             Recommendation: "Inspect timeout root cause",
@@ -872,7 +873,7 @@ public sealed class ReportingCompositionTests
         InsightFinding critical = new(
             Analyzer: "MemoryAnalyzer",
             Category: "Memory",
-            Severity: FindingSeverity.Critical,
+            Severity: Severity.Critical,
             Title: "Pinned object surge",
             Evidence: "Pinned segment pressure rising",
             Recommendation: "Review pinning behavior",
@@ -883,7 +884,7 @@ public sealed class ReportingCompositionTests
         InsightFinding info = new(
             Analyzer: "ThreadAnalyzer",
             Category: "Threads",
-            Severity: FindingSeverity.Info,
+            Severity: Severity.Info,
             Title: "Scheduler stall hint",
             Evidence: "Intermittent scheduling delays",
             Recommendation: "Validate worker distribution",

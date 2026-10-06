@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Text.Json.Serialization;
 using System.Collections.Generic;
 
@@ -359,7 +360,7 @@ internal sealed record AnalyzerMemoryDiagnosticRecord(
 
 internal sealed record ReportDomainSection(
     string Domain,
-    FindingSeverity? LeadSeverity,
+    Severity? LeadSeverity,
     IReadOnlyList<AnalyzerDetailSection> Sections,
     IReadOnlyList<FindingRecord> DomainInsights);
 

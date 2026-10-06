@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -27,10 +28,10 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
             InsightFinding finding = findings[i];
             switch (finding.Severity)
             {
-                case FindingSeverity.Critical:
+                case Severity.Critical:
                     criticalCount++;
                     break;
-                case FindingSeverity.Warning:
+                case Severity.Warning:
                     warningCount++;
                     break;
             }

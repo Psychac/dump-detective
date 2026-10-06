@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
@@ -18,7 +19,7 @@ internal sealed record FindingLifecycleResult(
 /// growth-rather-than-severity case) <c>TrendAnalyzer.ComputeNewLeakSignals</c>. One generic
 /// mechanism, computed once here.
 /// </summary>
-internal sealed record FindingSeverityChange(InsightFinding Current, FindingSeverity BaselineSeverity)
+internal sealed record FindingSeverityChange(InsightFinding Current, Severity BaselineSeverity)
 {
     public bool IsEscalation => (int)Current.Severity > (int)BaselineSeverity;
 }

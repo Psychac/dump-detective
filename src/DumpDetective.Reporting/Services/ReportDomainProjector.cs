@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Linq;
 
 using DumpDetective.Core.Enums;
@@ -19,7 +20,7 @@ internal static class ReportDomainProjector
         var domainOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var groupedSections = new Dictionary<string, List<AnalyzerDetailSection>>(StringComparer.OrdinalIgnoreCase);
         var domainInsights = new Dictionary<string, List<FindingRecord>>(StringComparer.OrdinalIgnoreCase);
-        var domainSeverity = new Dictionary<string, FindingSeverity?>(StringComparer.OrdinalIgnoreCase);
+        var domainSeverity = new Dictionary<string, Severity?>(StringComparer.OrdinalIgnoreCase);
 
         for (int i = 0; i < sections.Count; i++)
         {
@@ -35,7 +36,7 @@ internal static class ReportDomainProjector
             }
 
             list.Add(section);
-            if (!domainSeverity.TryGetValue(section.Domain, out FindingSeverity? current) || LeadSeverityOrder(section.LeadSeverity) < LeadSeverityOrder(current))
+            if (!domainSeverity.TryGetValue(section.Domain, out Severity? current) || LeadSeverityOrder(section.LeadSeverity) < LeadSeverityOrder(current))
                 domainSeverity[section.Domain] = section.LeadSeverity;
         }
 
@@ -86,7 +87,7 @@ internal static class ReportDomainProjector
 
             domains.Add(new ReportDomainSection(
                 Domain: domain,
-                LeadSeverity: domainSeverity.TryGetValue(domain, out FindingSeverity? severity) ? severity : null,
+                LeadSeverity: domainSeverity.TryGetValue(domain, out Severity? severity) ? severity : null,
                 Sections: pair.Value,
                 DomainInsights: sortedInsights));
         }
@@ -178,19 +179,19 @@ internal static class ReportDomainProjector
         _                => 99   // unmapped / cross-cutting sections go last
     };
 
-    public static int LeadSeverityOrder(FindingSeverity? s) => s switch
+    public static int LeadSeverityOrder(Severity? s) => s switch
     {
-        FindingSeverity.Critical => 0,
-        FindingSeverity.Warning  => 1,
-        FindingSeverity.Info     => 2,
+        Severity.Critical => 0,
+        Severity.Warning  => 1,
+        Severity.Info     => 2,
         null                     => 3,
         _                        => 3
     };
 
     public static int SeverityOrdinal(string severity) => severity switch
     {
-        nameof(FindingSeverity.Critical) => 2,
-        nameof(FindingSeverity.Warning) => 1,
+        nameof(Severity.Critical) => 2,
+        nameof(Severity.Warning) => 1,
         _ => 0
     };
 
@@ -198,7 +199,7 @@ internal static class ReportDomainProjector
 
     public static bool ShouldSuppressInfoInsight(FindingRecord finding)
     {
-        if (!string.Equals(finding.Severity, nameof(FindingSeverity.Info), StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(finding.Severity, nameof(Severity.Info), StringComparison.OrdinalIgnoreCase))
             return false;
 
         string category = NormalizeSortKey(finding.Category);

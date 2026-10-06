@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Text.Json;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
@@ -15,13 +16,13 @@ public class TrendVelocityTests
     {
         // Build three snapshots with increasing severity for Memory domain
         var s0 = new AnalysisSnapshot(0, "dump0.dmp", Array.Empty<AnalyzerRunResult>(),
-            new[] { new InsightFinding("MemoryAnalyzer", "X", FindingSeverity.Info, "t0", "e", "r", new string[0]) },
+            new[] { new InsightFinding("MemoryAnalyzer", "X", Severity.Info, "t0", "e", "r", new string[0]) },
             new Dictionary<string, AnalyzerDomainResult>(), DateTime.UtcNow);
         var s1 = new AnalysisSnapshot(1, "dump1.dmp", Array.Empty<AnalyzerRunResult>(),
-            new[] { new InsightFinding("MemoryAnalyzer", "X", FindingSeverity.Warning, "t1", "e", "r", new string[0]) },
+            new[] { new InsightFinding("MemoryAnalyzer", "X", Severity.Warning, "t1", "e", "r", new string[0]) },
             new Dictionary<string, AnalyzerDomainResult>(), DateTime.UtcNow);
         var s2 = new AnalysisSnapshot(2, "dump2.dmp", Array.Empty<AnalyzerRunResult>(),
-            new[] { new InsightFinding("MemoryAnalyzer", "X", FindingSeverity.Critical, "t2", "e", "r", new string[0]) },
+            new[] { new InsightFinding("MemoryAnalyzer", "X", Severity.Critical, "t2", "e", "r", new string[0]) },
             new Dictionary<string, AnalyzerDomainResult>(), DateTime.UtcNow);
 
         var snapshots = new[] { s0, s1, s2 };
@@ -41,13 +42,13 @@ public class TrendVelocityTests
     public void HealthScorecard_SerializesAndDeserializes_PreservingVelocity()
     {
         var s0 = new AnalysisSnapshot(0, "dump0.dmp", Array.Empty<AnalyzerRunResult>(),
-            new[] { new InsightFinding("MemoryAnalyzer", "X", FindingSeverity.Info, "t0", "e", "r", new string[0]) },
+            new[] { new InsightFinding("MemoryAnalyzer", "X", Severity.Info, "t0", "e", "r", new string[0]) },
             new Dictionary<string, AnalyzerDomainResult>(), DateTime.UtcNow);
         var s1 = new AnalysisSnapshot(1, "dump1.dmp", Array.Empty<AnalyzerRunResult>(),
-            new[] { new InsightFinding("MemoryAnalyzer", "X", FindingSeverity.Warning, "t1", "e", "r", new string[0]) },
+            new[] { new InsightFinding("MemoryAnalyzer", "X", Severity.Warning, "t1", "e", "r", new string[0]) },
             new Dictionary<string, AnalyzerDomainResult>(), DateTime.UtcNow);
         var s2 = new AnalysisSnapshot(2, "dump2.dmp", Array.Empty<AnalyzerRunResult>(),
-            new[] { new InsightFinding("MemoryAnalyzer", "X", FindingSeverity.Critical, "t2", "e", "r", new string[0]) },
+            new[] { new InsightFinding("MemoryAnalyzer", "X", Severity.Critical, "t2", "e", "r", new string[0]) },
             new Dictionary<string, AnalyzerDomainResult>(), DateTime.UtcNow);
 
         var snapshots = new[] { s0, s1, s2 };

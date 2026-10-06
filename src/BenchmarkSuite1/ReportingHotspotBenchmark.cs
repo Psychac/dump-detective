@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using DumpDetective.Analysis.Models;
@@ -85,7 +86,7 @@ public class ReportingHotspotBenchmark
             InsightFinding finding = new(
                 Analyzer: $"Analyzer-{i % 10}",
                 Category: "Leak",
-                Severity: i % 7 == 0 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Severity: i % 7 == 0 ? Severity.Warning : Severity.Info,
                 Title: "Duplicate candidate finding",
                 Evidence: $"Evidence {i} {longValue}",
                 Recommendation: "Review ownership and remove stale references.",
@@ -156,7 +157,7 @@ public class ReportingHotspotBenchmark
             newFindings.Add(new InsightFinding(
                 Analyzer: analyzerName,
                 Category: "Trend",
-                Severity: FindingSeverity.Warning,
+                Severity: Severity.Warning,
                 Title: $"New trend finding {analyzerIndex}",
                 Evidence: "Synthetic trend evidence.",
                 Recommendation: "Inspect the synthetic trend signal.",
@@ -166,7 +167,7 @@ public class ReportingHotspotBenchmark
             persistentFindings.Add(new InsightFinding(
                 Analyzer: analyzerName,
                 Category: "Trend",
-                Severity: FindingSeverity.Info,
+                Severity: Severity.Info,
                 Title: $"Persistent trend finding {analyzerIndex}",
                 Evidence: "Synthetic persistent evidence.",
                 Recommendation: "Track the synthetic trend signal.",

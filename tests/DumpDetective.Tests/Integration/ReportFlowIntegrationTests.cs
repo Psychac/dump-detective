@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Enums;
@@ -30,7 +31,7 @@ public sealed class ReportFlowIntegrationTests
         InsightFinding findingA = new(
             Analyzer: "RetentionAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "UNIQUE_DUP_TITLE",
             Evidence: "Evidence A",
             Recommendation: "Remediation A",
@@ -40,7 +41,7 @@ public sealed class ReportFlowIntegrationTests
         InsightFinding findingB = new(
             Analyzer: "RetentionAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Critical,
+            Severity: Severity.Critical,
             Title: "UNIQUE_DUP_TITLE",
             Evidence: "Evidence B",
             Recommendation: "Remediation B",
@@ -78,7 +79,7 @@ public sealed class ReportFlowIntegrationTests
         InsightFinding finding = new(
             Analyzer: "RetentionAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Canceled",
             Evidence: "Should not render",
             Recommendation: "n/a",
@@ -115,7 +116,7 @@ public sealed class ReportFlowIntegrationTests
         InsightFinding finding = new(
             Analyzer: "CrashAnalyzer",
             Category: "Crash",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Current snapshot finding",
             Evidence: "Unhandled exception",
             Recommendation: "Inspect crash thread",

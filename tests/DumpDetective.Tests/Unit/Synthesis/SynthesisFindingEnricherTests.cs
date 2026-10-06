@@ -22,7 +22,7 @@ public sealed class SynthesisFindingEnricherTests
 
         AnalyzerRunResult run = new("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null)
         {
-            Findings = [new InsightFinding("Stub Analyzer", "Old", DumpDetective.Core.Enums.FindingSeverity.Info, "old title", "old evidence", "old rec", [])],
+            Findings = [new InsightFinding("Stub Analyzer", "Old", DumpDetective.Sdk.Synthesis.Severity.Info, "old title", "old evidence", "old rec", [])],
         };
 
         IReadOnlyList<AnalyzerRunResult> result = (await enricher.EnrichAsync([run], [MakeObservation()], CancellationToken.None)).Runs;
@@ -38,7 +38,7 @@ public sealed class SynthesisFindingEnricherTests
 
         AnalyzerRunResult unrelated = new("Other Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null)
         {
-            Findings = [new InsightFinding("Other Analyzer", "Old", DumpDetective.Core.Enums.FindingSeverity.Info, "kept title", "kept evidence", "kept rec", [])],
+            Findings = [new InsightFinding("Other Analyzer", "Old", DumpDetective.Sdk.Synthesis.Severity.Info, "kept title", "kept evidence", "kept rec", [])],
         };
 
         IReadOnlyList<AnalyzerRunResult> result = (await enricher.EnrichAsync([unrelated], [MakeObservation()], CancellationToken.None)).Runs;

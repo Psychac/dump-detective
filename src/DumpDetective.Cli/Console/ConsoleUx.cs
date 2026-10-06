@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Orchestration.Discovery;
@@ -178,12 +179,12 @@ internal static class ConsoleUx
         SafeWriteRule(r);
     }
 
-    public static void InsightLine(FindingSeverity severity, string title, string? evidence, bool showEvidence)
+    public static void InsightLine(Severity severity, string title, string? evidence, bool showEvidence)
     {
         (string icon, string color) = severity switch
         {
-            FindingSeverity.Critical => ("✖", "bold red"),
-            FindingSeverity.Warning => ("▲", "yellow"),
+            Severity.Critical => ("✖", "bold red"),
+            Severity.Warning => ("▲", "yellow"),
             _ => ("ℹ", "silver"),
         };
         SafeMarkupLine($"  [{color}]{icon}  {Escape(title)}[/]");

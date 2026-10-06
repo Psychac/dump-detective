@@ -1,5 +1,6 @@
 namespace DumpDetective.Reporting.Services;
 
+using DumpDetective.Sdk.Synthesis;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -38,7 +39,7 @@ internal static class CorrelationBuilder
 
             // Candidate findings: regression-tagged OR warning/critical, and not too-low confidence
             var candidates = snapshot.Findings
-                .Where(f => (f.Tags?.Contains("regression") == true || f.Severity == FindingSeverity.Warning || f.Severity == FindingSeverity.Critical)
+                .Where(f => (f.Tags?.Contains("regression") == true || f.Severity == Severity.Warning || f.Severity == Severity.Critical)
                             && (f.ConfidenceScore ?? f.EffectiveConfidenceScore) >= MinConfidenceThreshold)
                 .ToArray();
 
@@ -55,7 +56,7 @@ internal static class CorrelationBuilder
                 if (idx < 0 || idx >= trendData.Snapshots.Count) continue;
                 var adjSnap = trendData.Snapshots[idx];
                 var adjCandidates = adjSnap.Findings
-                    .Where(f => (f.Tags?.Contains("regression") == true || f.Severity == FindingSeverity.Warning || f.Severity == FindingSeverity.Critical)
+                    .Where(f => (f.Tags?.Contains("regression") == true || f.Severity == Severity.Warning || f.Severity == Severity.Critical)
                                 && (f.ConfidenceScore ?? f.EffectiveConfidenceScore) >= MinConfidenceThreshold)
                     .Select(f => f.Analyzer)
                     .Distinct(StringComparer.Ordinal)
@@ -72,7 +73,7 @@ internal static class CorrelationBuilder
             double avgConfidence = candidates.Select(f => f.EffectiveConfidenceScore).DefaultIfEmpty(0.5).Average();
 
             // Severity weighting: Critical=1.2, Warning=1.0, default=0.9
-            double avgSeverityWeight = candidates.Select(f => f.Severity == FindingSeverity.Critical ? 1.2 : (f.Severity == FindingSeverity.Warning ? 1.0 : 0.9)).DefaultIfEmpty(1.0).Average();
+            double avgSeverityWeight = candidates.Select(f => f.Severity == Severity.Critical ? 1.2 : (f.Severity == Severity.Warning ? 1.0 : 0.9)).DefaultIfEmpty(1.0).Average();
 
             // Timeline boost: check trendData.Timeline for large per-analyzer deltas at this snapshot
             int boostCount = 0;

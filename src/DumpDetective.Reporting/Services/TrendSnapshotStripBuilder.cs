@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -28,8 +29,8 @@ internal static class TrendSnapshotStripBuilder
                 deltaVsBaseline = $"{pct:+0.0;-0.0}%";
             }
 
-            int criticalCount = snapshot.Findings.Count(f => f.Severity == FindingSeverity.Critical);
-            int warningCount  = snapshot.Findings.Count(f => f.Severity == FindingSeverity.Warning);
+            int criticalCount = snapshot.Findings.Count(f => f.Severity == Severity.Critical);
+            int warningCount  = snapshot.Findings.Count(f => f.Severity == Severity.Warning);
 
             string role = snapshot.Index == 0
                 ? "Baseline"

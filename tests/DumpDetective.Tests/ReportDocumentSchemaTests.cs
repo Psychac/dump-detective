@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Linq;
 using System.Text.Json;
 
@@ -36,7 +37,7 @@ public sealed class ReportDocumentSchemaTests
             [
                 new ReportDomainSection(
                     Domain: "Memory",
-                    LeadSeverity: FindingSeverity.Critical,
+                    LeadSeverity: Severity.Critical,
                     Sections:
                     [
                         new AnalyzerDetailSection("RetentionAnalyzer", "Retention Analysis", 25,

@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -23,7 +24,7 @@ public sealed class HtmlRendererCssTests
         var finding = new InsightFinding(
             Analyzer: "X",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Actionable item",
             Evidence: "Evidence",
             Recommendation: "Do something",
@@ -92,7 +93,7 @@ public sealed class HtmlRendererCssTests
         var finding = new InsightFinding(
             Analyzer: "RetentionAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Potential retention",
             Evidence: "Object growth observed",
             Recommendation: "Investigate root path",
@@ -171,7 +172,7 @@ public sealed class HtmlRendererCssTests
         var finding = new InsightFinding(
             Analyzer: "RetentionAnalyzer",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Potential retention",
             Evidence: "Object growth observed",
             Recommendation: "Investigate root path",
@@ -211,7 +212,7 @@ public sealed class HtmlRendererCssTests
         var finding = new InsightFinding(
             Analyzer: "RetentionAnalyzer",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Potential retention",
             Evidence: "Object growth observed",
             Recommendation: "Investigate root path",
@@ -250,7 +251,7 @@ public sealed class HtmlRendererCssTests
         var finding = new InsightFinding(
             Analyzer: "RetentionAnalyzer",
             Category: "Memory",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Potential retention",
             Evidence: "Object growth observed",
             Recommendation: "Investigate root path",
@@ -395,7 +396,7 @@ public sealed class HtmlRendererCssTests
         var finding = new InsightFinding(
             Analyzer: "RetentionAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Warning,
+            Severity: Severity.Warning,
             Title: "Potential retention",
             Evidence: "Object growth observed",
             Recommendation: "Investigate root path",

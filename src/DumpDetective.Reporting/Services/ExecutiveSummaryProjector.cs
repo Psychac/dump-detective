@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
@@ -89,8 +90,8 @@ internal sealed class ExecutiveSummaryProjector
 
     private static int SeverityOrdinal(string severity) => severity switch
     {
-        nameof(FindingSeverity.Critical) => 2,
-        nameof(FindingSeverity.Warning) => 1,
+        nameof(Severity.Critical) => 2,
+        nameof(Severity.Warning) => 1,
         _ => 0
     };
 

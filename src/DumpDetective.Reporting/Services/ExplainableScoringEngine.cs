@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Reporting.Models;
 
@@ -115,8 +116,8 @@ internal static class ExplainableScoringEngine
 
     private static int SeverityOrdinal(string severity) => severity switch
     {
-        nameof(FindingSeverity.Critical) => 2,
-        nameof(FindingSeverity.Warning) => 1,
+        nameof(Severity.Critical) => 2,
+        nameof(Severity.Warning) => 1,
         _ => 0,
     };
 }

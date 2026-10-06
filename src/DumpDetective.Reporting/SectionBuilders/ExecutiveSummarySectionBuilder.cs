@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
@@ -36,8 +37,8 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         FinalizableObjectDomainResult? finalizable = results.Get<FinalizableObjectDomainResult>();
         HangDomainResult? hang = results.Get<HangDomainResult>();
         IReadOnlyList<InsightFinding> findings = results.AllFindingsSorted();
-        IReadOnlyList<InsightFinding> criticalFindings = BuildFindingsBySeverity(findings, FindingSeverity.Critical, 5);
-        IReadOnlyList<InsightFinding> warningFindings = BuildFindingsBySeverity(findings, FindingSeverity.Warning, 5);
+        IReadOnlyList<InsightFinding> criticalFindings = BuildFindingsBySeverity(findings, Severity.Critical, 5);
+        IReadOnlyList<InsightFinding> warningFindings = BuildFindingsBySeverity(findings, Severity.Warning, 5);
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>();
         if (memory is not null)
@@ -195,7 +196,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         for (int i = 0; i < findings.Count; i++)
         {
             InsightFinding finding = findings[i];
-            if (finding.Severity is not (FindingSeverity.Critical or FindingSeverity.Warning))
+            if (finding.Severity is not (Severity.Critical or Severity.Warning))
                 continue;
 
             recommendations.Add(finding);
@@ -206,7 +207,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         return recommendations;
     }
 
-    private static IReadOnlyList<InsightFinding> BuildFindingsBySeverity(IReadOnlyList<InsightFinding> findings, FindingSeverity severity, int limit)
+    private static IReadOnlyList<InsightFinding> BuildFindingsBySeverity(IReadOnlyList<InsightFinding> findings, Severity severity, int limit)
     {
         var selected = new List<InsightFinding>(limit);
         for (int i = 0; i < findings.Count; i++)

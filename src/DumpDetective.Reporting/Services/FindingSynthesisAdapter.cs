@@ -18,7 +18,7 @@ internal static class FindingSynthesisAdapter
     public static InsightFinding ToInsightFinding(Claim finding) => new(
         Analyzer: finding.Analyzer,
         Category: finding.Category,
-        Severity: ToFindingSeverity(finding.Severity),
+        Severity: finding.Severity,
         Title: finding.Title,
         Evidence: finding.Narrative,
         Recommendation: finding.Recommendation,
@@ -37,12 +37,4 @@ internal static class FindingSynthesisAdapter
     // evidence-based override reported. Only a measured limitation overrides that default.
     private static double? ToConfidenceScore(ConfidenceBreakdown confidence) =>
         confidence.Composite < 1.0 ? confidence.Composite : null;
-
-    private static FindingSeverity ToFindingSeverity(Severity severity) => severity switch
-    {
-        Severity.Info => FindingSeverity.Info,
-        Severity.Warning => FindingSeverity.Warning,
-        Severity.Critical => FindingSeverity.Critical,
-        _ => throw new ArgumentOutOfRangeException(nameof(severity), severity, "Unmapped Sdk.Synthesis.Severity value."),
-    };
 }

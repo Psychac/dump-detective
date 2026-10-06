@@ -1,4 +1,5 @@
-﻿using DumpDetective.Core.Enums;
+﻿using DumpDetective.Sdk.Synthesis;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
@@ -103,10 +104,10 @@ internal static class ReportSectionAssembler
     public static void ApplySectionMetadata(List<AnalyzerDetailSection> sections, IReadOnlyList<AnalyzerRunResult> runs)
     {
         // Build analyzerName → max finding severity
-        var severityByAnalyzer = new Dictionary<string, FindingSeverity>(runs.Count, StringComparer.OrdinalIgnoreCase);
+        var severityByAnalyzer = new Dictionary<string, Severity>(runs.Count, StringComparer.OrdinalIgnoreCase);
         foreach (AnalyzerRunResult run in runs)
         {
-            FindingSeverity maxSev = FindingSeverity.Info;
+            Severity maxSev = Severity.Info;
             foreach (InsightFinding f in run.Findings)
             {
                 if (f.Severity > maxSev) maxSev = f.Severity;
@@ -120,8 +121,8 @@ internal static class ReportSectionAssembler
             if (!SectionIdDomainMap.TryGet(section.AnalyzerName, out string domain, out string sectionId))
                 continue;
 
-            severityByAnalyzer.TryGetValue(section.AnalyzerName, out FindingSeverity leadSev);
-            FindingSeverity? lead = leadSev == FindingSeverity.Info && section.LeadSeverity is null ? null : leadSev;
+            severityByAnalyzer.TryGetValue(section.AnalyzerName, out Severity leadSev);
+            Severity? lead = leadSev == Severity.Info && section.LeadSeverity is null ? null : leadSev;
 
             sections[i] = section with
             {
@@ -191,7 +192,7 @@ internal static class ReportSectionAssembler
                         top = finding;
                 }
 
-                if (top is not null && top.Severity != FindingSeverity.Info)
+                if (top is not null && top.Severity != Severity.Info)
                 {
                     double score = top.EffectiveConfidenceScore;
 

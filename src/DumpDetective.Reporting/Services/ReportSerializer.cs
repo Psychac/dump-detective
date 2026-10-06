@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -142,7 +143,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
                     Id: $"analyzer-failure:{run.AnalyzerName}",
                     Analyzer: run.AnalyzerName,
                     Category: "Pipeline",
-                    Severity: nameof(FindingSeverity.Warning),
+                    Severity: nameof(Severity.Warning),
                     Title: $"Analyzer failed: {run.AnalyzerName}",
                     Details: [evidence],
                     Recommendation: "Inspect analyzer failure details and re-run analysis.",

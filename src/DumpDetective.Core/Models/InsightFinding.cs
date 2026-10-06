@@ -1,11 +1,12 @@
-﻿using DumpDetective.Core.Enums;
+﻿using DumpDetective.Sdk.Synthesis;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Core.Models;
 
 public sealed record InsightFinding(
 string Analyzer,
 string Category,
-FindingSeverity Severity,
+Severity Severity,
 string Title,
 string Evidence,
 string Recommendation,
@@ -19,8 +20,8 @@ IReadOnlyList<FindingEvidenceTable>? EvidenceTables = null)
 {
     public double? ConfidenceScore { get; init; } = ConfidenceScore ?? Severity switch
     {
-        FindingSeverity.Critical => 0.9,
-        FindingSeverity.Warning => 0.7,
+        Severity.Critical => 0.9,
+        Severity.Warning => 0.7,
         _ => 0.5
     };
 
@@ -35,8 +36,8 @@ IReadOnlyList<FindingEvidenceTable>? EvidenceTables = null)
 
     public double EffectiveConfidenceScore => ConfidenceScore ?? Severity switch
     {
-        FindingSeverity.Critical => 0.9,
-        FindingSeverity.Warning => 0.7,
+        Severity.Critical => 0.9,
+        Severity.Warning => 0.7,
         _ => 0.5
     };
 

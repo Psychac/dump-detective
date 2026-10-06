@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -37,8 +38,8 @@ internal static class TrendHealthScorecardBuilder
             if (string.IsNullOrEmpty(domain)) continue;
             if (!currentCounts.TryGetValue(domain, out var cnt))
                 cnt = (0, 0, 0);
-            int critical = f.Severity == FindingSeverity.Critical ? 1 : 0;
-            int warning  = f.Severity == FindingSeverity.Warning  ? 1 : 0;
+            int critical = f.Severity == Severity.Critical ? 1 : 0;
+            int warning  = f.Severity == Severity.Warning  ? 1 : 0;
             currentCounts[domain] = (cnt.FindingCount + 1, cnt.CriticalCount + critical, cnt.WarningCount + warning);
         }
 
@@ -50,8 +51,8 @@ internal static class TrendHealthScorecardBuilder
             if (string.IsNullOrEmpty(domain)) continue;
             if (!baselineCounts.TryGetValue(domain, out var cnt))
                 cnt = (0, 0, 0);
-            int critical = f.Severity == FindingSeverity.Critical ? 1 : 0;
-            int warning  = f.Severity == FindingSeverity.Warning  ? 1 : 0;
+            int critical = f.Severity == Severity.Critical ? 1 : 0;
+            int warning  = f.Severity == Severity.Warning  ? 1 : 0;
             baselineCounts[domain] = (cnt.FindingCount + 1, cnt.CriticalCount + critical, cnt.WarningCount + warning);
         }
 
@@ -103,9 +104,9 @@ internal static class TrendHealthScorecardBuilder
             for (int si = 0; si < snapshots.Count; si++)
             {
                 int cCrit = snapshots[si].Findings.Count(f => string.Equals(SectionIdDomainMap.GetDomain(f.Analyzer), domain, StringComparison.Ordinal));
-                int cWarn = snapshots[si].Findings.Count(f => string.Equals(SectionIdDomainMap.GetDomain(f.Analyzer), domain, StringComparison.Ordinal) && f.Severity == FindingSeverity.Warning);
+                int cWarn = snapshots[si].Findings.Count(f => string.Equals(SectionIdDomainMap.GetDomain(f.Analyzer), domain, StringComparison.Ordinal) && f.Severity == Severity.Warning);
                 // Note: cCrit counts all findings in domain (not only criticals); need critical-only
-                int cCritOnly = snapshots[si].Findings.Count(f => string.Equals(SectionIdDomainMap.GetDomain(f.Analyzer), domain, StringComparison.Ordinal) && f.Severity == FindingSeverity.Critical);
+                int cCritOnly = snapshots[si].Findings.Count(f => string.Equals(SectionIdDomainMap.GetDomain(f.Analyzer), domain, StringComparison.Ordinal) && f.Severity == Severity.Critical);
                 if (cCritOnly > peakCrit) { peakCrit = cCritOnly; peakCritIdx = snapshots[si].Index; }
                 if (cWarn > peakWarn) { peakWarn = cWarn; peakWarnIdx = snapshots[si].Index; }
             }
@@ -249,8 +250,8 @@ internal static class TrendHealthScorecardBuilder
 
             DomainSeverity fSev = f.Severity switch
             {
-                FindingSeverity.Critical => DomainSeverity.Critical,
-                FindingSeverity.Warning  => DomainSeverity.Warning,
+                Severity.Critical => DomainSeverity.Critical,
+                Severity.Warning  => DomainSeverity.Warning,
                 _                        => DomainSeverity.OK
             };
 

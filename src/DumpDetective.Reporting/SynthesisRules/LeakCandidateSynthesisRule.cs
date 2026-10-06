@@ -302,10 +302,10 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
     // ── Moved verbatim from LeakCandidateAnalyzer (LeakClass enum lives in Core.Models — the
     // ── analyzer's own copy references it the same way) ────────────────────────────────────────
 
-    private static Severity ToSeverity(FindingSeverity severity) => severity switch
+    private static Severity ToSeverity(Severity severity) => severity switch
     {
-        FindingSeverity.Critical => Severity.Critical,
-        FindingSeverity.Warning => Severity.Warning,
+        Severity.Critical => Severity.Critical,
+        Severity.Warning => Severity.Warning,
         _ => Severity.Info,
     };
 }

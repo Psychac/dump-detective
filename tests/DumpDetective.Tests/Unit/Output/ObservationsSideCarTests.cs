@@ -101,7 +101,7 @@ public sealed class ObservationsSideCarTests : IDisposable
     [Fact]
     public void BuildReportDocument_AttachesLineageAndBreakdownToTheMatchingFinding()
     {
-        var finding = new InsightFinding("Stub Analyzer", "Leak", DumpDetective.Core.Enums.FindingSeverity.Warning, "title", "evidence", "rec", [], Fingerprint: "stub-fingerprint");
+        var finding = new InsightFinding("Stub Analyzer", "Leak", DumpDetective.Sdk.Synthesis.Severity.Warning, "title", "evidence", "rec", [], Fingerprint: "stub-fingerprint");
         var run = new AnalyzerRunResult("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null)
         {
             Findings = [finding],
@@ -155,7 +155,7 @@ public sealed class ObservationsSideCarTests : IDisposable
     public void StructuredClaimFields_ReachReportJson_AndTheEmbeddedHtmlGetsOnlyTheSlimClaimView()
     {
         ObservationId cited = ObservationId.NewId();
-        var finding = new InsightFinding("Stub Analyzer", "Leak", DumpDetective.Core.Enums.FindingSeverity.Warning, "title", "evidence", "rec", [], Fingerprint: "stub-fingerprint");
+        var finding = new InsightFinding("Stub Analyzer", "Leak", DumpDetective.Sdk.Synthesis.Severity.Warning, "title", "evidence", "rec", [], Fingerprint: "stub-fingerprint");
         var run = new AnalyzerRunResult("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null)
         {
             Findings = [finding],

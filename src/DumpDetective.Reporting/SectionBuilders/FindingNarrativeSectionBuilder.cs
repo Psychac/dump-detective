@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -13,7 +14,7 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
     public int SortOrder => 1675;
 
     public bool CanBuild(AnalyzerResultSet results)
-        => results.AllFindingsSorted().Any(static finding => finding.Severity is FindingSeverity.Critical or FindingSeverity.Warning);
+        => results.AllFindingsSorted().Any(static finding => finding.Severity is Severity.Critical or Severity.Warning);
 
     public AnalyzerDetailSection Build(AnalyzerResultSet results)
     {
@@ -22,7 +23,7 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
 
         foreach (InsightFinding finding in findings)
         {
-            if (finding.Severity is FindingSeverity.Critical or FindingSeverity.Warning)
+            if (finding.Severity is Severity.Critical or Severity.Warning)
                 highSeverity.Add(finding);
         }
 
@@ -89,8 +90,8 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
 
         return finding.Severity switch
         {
-            FindingSeverity.Critical => $"{analyzer} produced a Critical signal in {category}, which usually indicates a direct retention or pressure path that is already large enough to affect the process.",
-            FindingSeverity.Warning => $"{analyzer} produced a Warning in {category}, which usually means the pattern is trending in the wrong direction or is close to a threshold.",
+            Severity.Critical => $"{analyzer} produced a Critical signal in {category}, which usually indicates a direct retention or pressure path that is already large enough to affect the process.",
+            Severity.Warning => $"{analyzer} produced a Warning in {category}, which usually means the pattern is trending in the wrong direction or is close to a threshold.",
             _ => $"{analyzer} produced a non-critical signal in {category}."
         };
     }
@@ -99,8 +100,8 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
     {
         return finding.Severity switch
         {
-            FindingSeverity.Critical => $"Expected effect: {finding.Title} can keep memory, threads, or handles alive long enough to cause visible slowdown, retention growth, or recovery failure.",
-            FindingSeverity.Warning => $"Expected effect: {finding.Title} can grow into a production issue if the same allocation or retention path continues.",
+            Severity.Critical => $"Expected effect: {finding.Title} can keep memory, threads, or handles alive long enough to cause visible slowdown, retention growth, or recovery failure.",
+            Severity.Warning => $"Expected effect: {finding.Title} can grow into a production issue if the same allocation or retention path continues.",
             _ => $"Expected effect: {finding.Title} is notable but lower urgency."
         };
     }
@@ -120,8 +121,8 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
 
         return finding.Severity switch
         {
-            FindingSeverity.Critical => "Investigate the owning path, remove the retention source, and verify the object graph no longer grows.",
-            FindingSeverity.Warning => "Review the pattern, add a guardrail, and validate that the signal does not continue to increase.",
+            Severity.Critical => "Investigate the owning path, remove the retention source, and verify the object graph no longer grows.",
+            Severity.Warning => "Review the pattern, add a guardrail, and validate that the signal does not continue to increase.",
             _ => "Review the analyzer output and confirm whether the signal is actionable."
         };
     }

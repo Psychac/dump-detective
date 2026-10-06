@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
@@ -205,7 +206,7 @@ public sealed class ExplainableScoringEngineTests
         var finding = new InsightFinding(
             Analyzer: "LeakAnalyzer",
             Category: "Leak",
-            Severity: FindingSeverity.Critical,
+            Severity: Severity.Critical,
             Title: "Heap leak detected",
             Evidence: "Top type: byte[] 200MB",
             Recommendation: "Investigate retention chain",

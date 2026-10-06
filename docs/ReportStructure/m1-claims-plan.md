@@ -135,10 +135,18 @@ system. It gates M4.
      `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
      when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
      they change on any rebuild, so identical rules from different builds would look different.
-4. **Rule migration** *(in progress — 1 of 76 rules, started 2026-10-05)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+4. **Rule migration** *(in progress — 6 of 76 rules; pilot 2026-10-05, batch 1 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
    - Done: `LohFragmentationSynthesisRule` (pilot), with the per-rule golden mechanism
      (`Golden/RuleShapeGolden.cs`, goldens in `Golden/RuleShapes/`; `DD_BLESS_RULE_SHAPES=1` to bless). Fails when
      a rule's claim shape changes without a `Version` bump, or the version changes without a re-bless.
+   - Batch 1 (2026-10-06): `SqlCommand`, `SqlTransaction`, `SqlConnectionPool`, `LockGraph`, `StaticRoot`. Tests in
+     `InfrastructureAndRuntimeRuleClaimTests`. Verified on the reference dump: 5 of 82 findings carry an assertion
+     (`SqlConnectionPool` did not fire on this dump; covered by unit tests only).
+   - `RuleShapeGolden` now enforces the plan's per-claim gates on every migrated rule: an assertion, at least one
+     falsification test, an explicit counter (evidence or `None` with a reason), non-empty support, and every cited
+     observation inside the claim's own `DerivedFrom`. Long evidence lists collapse to ranges in goldens.
+   - Still to build: the cross-claim guard that flags near-identical `falsifiedBy` text; it needs more rules
+     migrated before it can say anything useful.
    - Plumbing: the structured fields now reach `report.json` per finding (`assertion`, `support`, `counter`,
      `falsifiedBy`) and are omitted from the HTML's embedded JSON. Step 2 had only carried lineage, so the first
      real-dump check of the pilot found they were not being written; fixed.

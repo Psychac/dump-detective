@@ -1,0 +1,196 @@
+rule: sql-transaction.finding-parity
+version: 1
+[
+  {
+    "name": "warning-mostly-holding",
+    "claims": [
+      {
+        "fingerprint": "sql transaction analysis::active-transactions",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 5,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 5,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "SQL transaction objects still holding an open connection"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..4]"
+            ],
+            "why": "Each is a transaction object that still references an owning connection."
+          },
+          {
+            "observations": [
+              "observations[5]"
+            ],
+            "why": "Supplies the total, disposed and other transaction counts."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Nothing observed separates transactions still in flight from transactions abandoned; only the reference to a connection is visible."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than the reported 8 transaction objects are live, the count includes garbage awaiting collection, not open transactions.",
+            "command": "!dumpheap -live -stat -type SqlTransaction"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On a sampled transaction: if its root is an in-flight request frame, it is a transaction legitimately in progress, not an abandoned one.",
+            "command": "!gcroot \u003Ctransaction address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If every code path commits or rolls back inside a using block, remaining instances are in-flight work, not leaks."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning-mostly-not-holding",
+    "claims": [
+      {
+        "fingerprint": "sql transaction analysis::active-transactions",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 5,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 5,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "SQL transaction objects still holding an open connection"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..4]"
+            ],
+            "why": "Each is a transaction object that still references an owning connection."
+          },
+          {
+            "observations": [
+              "observations[5]"
+            ],
+            "why": "Supplies the total, disposed and other transaction counts."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[5]"
+              ],
+              "why": "35 transaction objects are not holding a connection, more than the 5 that are, so holding one is not the norm."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than the reported 40 transaction objects are live, the count includes garbage awaiting collection, not open transactions.",
+            "command": "!dumpheap -live -stat -type SqlTransaction"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On a sampled transaction: if its root is an in-flight request frame, it is a transaction legitimately in progress, not an abandoned one.",
+            "command": "!gcroot \u003Ctransaction address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If every code path commits or rolls back inside a using block, remaining instances are in-flight work, not leaks."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical",
+    "claims": [
+      {
+        "fingerprint": "sql transaction analysis::active-transactions",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 25,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 25,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "SQL transaction objects still holding an open connection"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..24]"
+            ],
+            "why": "Each is a transaction object that still references an owning connection."
+          },
+          {
+            "observations": [
+              "observations[25]"
+            ],
+            "why": "Supplies the total, disposed and other transaction counts."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Nothing observed separates transactions still in flight from transactions abandoned; only the reference to a connection is visible."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than the reported 30 transaction objects are live, the count includes garbage awaiting collection, not open transactions.",
+            "command": "!dumpheap -live -stat -type SqlTransaction"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On a sampled transaction: if its root is an in-flight request frame, it is a transaction legitimately in progress, not an abandoned one.",
+            "command": "!gcroot \u003Ctransaction address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If every code path commits or rolls back inside a using block, remaining instances are in-flight work, not leaks."
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,196 @@
+rule: sql-command.finding-parity
+version: 1
+[
+  {
+    "name": "warning-mostly-attached",
+    "claims": [
+      {
+        "fingerprint": "sql command analysis::outstanding-commands",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 100,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "SQL command objects still referencing a connection"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..99]"
+            ],
+            "why": "Each is a command object on the heap that still references a connection."
+          },
+          {
+            "observations": [
+              "observations[100]"
+            ],
+            "why": "Supplies the total and detached command counts."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Nothing observed separates commands cached on purpose from commands leaked; only the reference to a connection is visible."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than the reported 150 command objects are live, the count includes garbage awaiting collection, not retained commands.",
+            "command": "!dumpheap -live -stat -type SqlCommand"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On a sampled command: if its root is a short-lived request frame, not a long-lived owner such as a cache or static field, the commands are not being held.",
+            "command": "!gcroot \u003Ccommand address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code deliberately caches prepared commands, the retention is by design, not a leak."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning-mostly-detached",
+    "claims": [
+      {
+        "fingerprint": "sql command analysis::outstanding-commands",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 100,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "SQL command objects still referencing a connection"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..99]"
+            ],
+            "why": "Each is a command object on the heap that still references a connection."
+          },
+          {
+            "observations": [
+              "observations[100]"
+            ],
+            "why": "Supplies the total and detached command counts."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[100]"
+              ],
+              "why": "300 command objects are already detached from their connection, more than the 100 still attached, so holding a connection is not the norm."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than the reported 400 command objects are live, the count includes garbage awaiting collection, not retained commands.",
+            "command": "!dumpheap -live -stat -type SqlCommand"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On a sampled command: if its root is a short-lived request frame, not a long-lived owner such as a cache or static field, the commands are not being held.",
+            "command": "!gcroot \u003Ccommand address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code deliberately caches prepared commands, the retention is by design, not a leak."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical",
+    "claims": [
+      {
+        "fingerprint": "sql command analysis::outstanding-commands",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 1000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 1000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "SQL command objects still referencing a connection"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..999]"
+            ],
+            "why": "Each is a command object on the heap that still references a connection."
+          },
+          {
+            "observations": [
+              "observations[1000]"
+            ],
+            "why": "Supplies the total and detached command counts."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Nothing observed separates commands cached on purpose from commands leaked; only the reference to a connection is visible."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than the reported 1,100 command objects are live, the count includes garbage awaiting collection, not retained commands.",
+            "command": "!dumpheap -live -stat -type SqlCommand"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On a sampled command: if its root is a short-lived request frame, not a long-lived owner such as a cache or static field, the commands are not being held.",
+            "command": "!gcroot \u003Ccommand address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code deliberately caches prepared commands, the retention is by design, not a leak."
+          }
+        ]
+      }
+    ]
+  }
+]

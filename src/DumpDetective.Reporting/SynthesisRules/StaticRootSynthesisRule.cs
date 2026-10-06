@@ -88,6 +88,25 @@ internal sealed class StaticRootSynthesisRule : ISynthesisRule
                 MetricUnit = "retained-bytes",
                 DerivedFrom = [population.Id],
                 Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Normal,
+                    Measure = ClaimParts.Count(0),
+                    Qualifiers = new AssertionQualifiers { Location = "static roots retaining significant object graphs" },
+                },
+                Support = [new EvidenceStatement([population.Id], "Counted no static roots above the significance cutoff.")],
+                Counter = Counter.Of(new EvidenceStatement(
+                    [population.Id],
+                    "Only static roots retaining significant object graphs are reported; smaller retention is outside this check.")),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <address of the largest object>",
+                        Test = "If the largest objects in !dumpheap -stat are rooted from a static field, a retaining static root was missed.",
+                    },
+                ],
             }]);
         }
 
@@ -111,8 +130,77 @@ internal sealed class StaticRootSynthesisRule : ISynthesisRule
             MetricUnit = "retained-bytes",
             DerivedFrom = rootIds.Count > 0 ? [population.Id, .. rootIds] : [population.Id],
             Confidence = RootPathEvidenceStrength.FromMeasures(population.Measures, "top-root."),
+            Assertion = BuildAssertion(severity, rootCount, maxRetainedBytes, totalRetainedBytes),
+            Support = BuildSupport(population, rootIds, rootCount, totalRetainedBytes),
+            Counter = Counter.None("Nothing observed separates a static cache kept on purpose from a static reference that was never cleared; these are candidates, not confirmed leaks."),
+            FalsifiedBy = BuildFalsifiedBy(totalRetainedBytes),
         }]);
     }
+
+    private static Assertion BuildAssertion(Severity severity, long rootCount, ulong maxRetainedBytes, ulong totalRetainedBytes)
+    {
+        bool tooManyRoots = rootCount >= RootCountCriticalThreshold;
+        bool largestRootTooLarge = maxRetainedBytes > CriticalByteThreshold;
+
+        if (severity == Severity.Critical && tooManyRoots)
+            return new Assertion
+            {
+                Predicate = AssertionPredicate.Retains,
+                Measure = ClaimParts.Count(rootCount),
+                Reference = ClaimParts.Budget(ClaimParts.Count(RootCountCriticalThreshold), "critical root-count threshold"),
+                Qualifiers = new AssertionQualifiers { Location = "static roots retaining significant object graphs" },
+            };
+
+        if (severity == Severity.Critical && largestRootTooLarge)
+            return new Assertion
+            {
+                Predicate = AssertionPredicate.Retains,
+                Measure = ClaimParts.Bytes(maxRetainedBytes),
+                Reference = ClaimParts.Budget(ClaimParts.Bytes(CriticalByteThreshold), "critical per-root threshold"),
+                Qualifiers = new AssertionQualifiers { Location = "the largest static root" },
+            };
+
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Retains,
+            Measure = ClaimParts.Bytes(totalRetainedBytes),
+            Qualifiers = new AssertionQualifiers { Location = "static roots retaining significant object graphs" },
+        };
+    }
+
+    private static IReadOnlyList<EvidenceStatement> BuildSupport(
+        Observation population, List<ObservationId> rootIds, long rootCount, ulong totalRetainedBytes)
+    {
+        var support = new List<EvidenceStatement>(2)
+        {
+            new([population.Id], $"Totals {rootCount:N0} root(s) retaining about {FormatHelper.FormatBytes(totalRetainedBytes)}."),
+        };
+
+        if (rootIds.Count > 0)
+            support.Add(new(rootIds, "Each is a static root retaining a significant object graph."));
+
+        return support;
+    }
+
+    private static IReadOnlyList<FalsificationTest> BuildFalsifiedBy(ulong totalRetainedBytes) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!gcroot <object address>",
+            Test = "On an instance of the largest retained type: if the path starts at a thread stack or the finalizer queue, not a static handle, the static-root attribution is wrong.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Capture,
+            Test = $"Capture a second dump later under comparable load; if the roots still retain about {FormatHelper.FormatBytes(totalRetainedBytes)} and no more, this is a bounded cache, not growth.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.CodeInspection,
+            Test = "If the owning static field is cleared or replaced on a schedule in the application code, the retention is bounded by design.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

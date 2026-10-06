@@ -1,0 +1,104 @@
+rule: sql-connection-pool.finding-parity
+version: 1
+[
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "sql connection pool analysis::near-capacity",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 85,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 80,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "near-capacity threshold"
+          },
+          "qualifiers": {
+            "location": "pool (unknown server/database)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The most utilised pool has 85 of 100 connections in use."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Utilisation is a point-in-time read of the pool counters; nothing observed shows whether it is transient."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if this pool falls below 80% from 85.0%, the reading was a spike, not sustained saturation."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the connection string for this pool sets Max Pool Size to anything other than 100, the utilisation percentage is wrong."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-with-a-quiet-pool",
+    "claims": [
+      {
+        "fingerprint": "sql connection pool analysis::near-capacity",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 96,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 95,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical utilisation threshold"
+          },
+          "qualifiers": {
+            "location": "pool (unknown server/database)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The most utilised pool has 96 of 100 connections in use."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Utilisation is a point-in-time read of the pool counters; nothing observed shows whether it is transient."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if this pool falls below 80% from 96.0%, the reading was a spike, not sustained saturation."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the connection string for this pool sets Max Pool Size to anything other than 100, the utilisation percentage is wrong."
+          }
+        ]
+      }
+    ]
+  }
+]

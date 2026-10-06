@@ -82,6 +82,10 @@ internal sealed class SqlConnectionPoolSynthesisRule : ISynthesisRule
             MetricUnit = "% utilised",
             DerivedFrom = [worst.Id],
             Confidence = ConfidenceBreakdown.MeasurementCertain,
+            Assertion = BuildAssertion(sev, worstPct, poolLabel),
+            Support = [new EvidenceStatement([worst.Id], $"The most utilised pool has {currentSize:N0} of {maxPoolSize:N0} connections in use.")],
+            Counter = Counter.None("Utilisation is a point-in-time read of the pool counters; nothing observed shows whether it is transient."),
+            FalsifiedBy = BuildFalsifiedBy(worstPct, maxPoolSize),
         };
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
@@ -94,6 +98,34 @@ internal sealed class SqlConnectionPoolSynthesisRule : ISynthesisRule
         pool.Measures.TryGetValue("max.size", out Measure maxMeasure) && maxMeasure.Value > 0
             ? 100.0 * pool.Measures["current.size"].Value / maxMeasure.Value
             : -1;
+
+    private static Assertion BuildAssertion(Severity severity, double worstPercent, string poolLabel)
+    {
+        bool critical = severity == Severity.Critical;
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Exceeds,
+            Measure = ClaimParts.Percent(worstPercent),
+            Reference = ClaimParts.Budget(
+                ClaimParts.Percent(critical ? CriticalUtilizationPct : NearCapacityUtilizationPct),
+                critical ? "critical utilisation threshold" : "near-capacity threshold"),
+            Qualifiers = new AssertionQualifiers { Location = $"pool {poolLabel}" },
+        };
+    }
+
+    private static IReadOnlyList<FalsificationTest> BuildFalsifiedBy(double worstPercent, long maxPoolSize) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Capture,
+            Test = $"Capture a second dump under comparable load; if this pool falls below {NearCapacityUtilizationPct:F0}% from {worstPercent:F1}%, the reading was a spike, not sustained saturation.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.CodeInspection,
+            Test = $"If the connection string for this pool sets Max Pool Size to anything other than {maxPoolSize:N0}, the utilisation percentage is wrong.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

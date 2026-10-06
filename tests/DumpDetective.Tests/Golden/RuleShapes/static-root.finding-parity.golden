@@ -1,0 +1,225 @@
+rule: static-root.finding-parity
+version: 1
+[
+  {
+    "name": "none",
+    "claims": [
+      {
+        "fingerprint": "static root leak detection::no-candidates",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 0,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "static roots retaining significant object graphs"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counted no static roots above the significance cutoff."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Only static roots retaining significant object graphs are reported; smaller retention is outside this check."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the largest objects in !dumpheap -stat are rooted from a static field, a retaining static root was missed.",
+            "command": "!gcroot \u003Caddress of the largest object\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "static root leak detection::retention-candidates",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 31457280,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "static roots retaining significant object graphs"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Totals 3 root(s) retaining about 30 MB."
+          },
+          {
+            "observations": [
+              "observations[1..3]"
+            ],
+            "why": "Each is a static root retaining a significant object graph."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Nothing observed separates a static cache kept on purpose from a static reference that was never cleared; these are candidates, not confirmed leaks."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On an instance of the largest retained type: if the path starts at a thread stack or the finalizer queue, not a static handle, the static-root attribution is wrong.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump later under comparable load; if the roots still retain about 30 MB and no more, this is a bounded cache, not growth."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning static field is cleared or replaced on a schedule in the application code, the retention is bounded by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-by-root-count",
+    "claims": [
+      {
+        "fingerprint": "static root leak detection::retention-candidates",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 12,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical root-count threshold"
+          },
+          "qualifiers": {
+            "location": "static roots retaining significant object graphs"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Totals 12 root(s) retaining about 12 MB."
+          },
+          {
+            "observations": [
+              "observations[1..12]"
+            ],
+            "why": "Each is a static root retaining a significant object graph."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Nothing observed separates a static cache kept on purpose from a static reference that was never cleared; these are candidates, not confirmed leaks."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On an instance of the largest retained type: if the path starts at a thread stack or the finalizer queue, not a static handle, the static-root attribution is wrong.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump later under comparable load; if the roots still retain about 12 MB and no more, this is a bounded cache, not growth."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning static field is cleared or replaced on a schedule in the application code, the retention is bounded by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-by-largest-root",
+    "claims": [
+      {
+        "fingerprint": "static root leak detection::retention-candidates",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 209715200,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 104857600,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "critical per-root threshold"
+          },
+          "qualifiers": {
+            "location": "the largest static root"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Totals 2 root(s) retaining about 250 MB."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "Each is a static root retaining a significant object graph."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Nothing observed separates a static cache kept on purpose from a static reference that was never cleared; these are candidates, not confirmed leaks."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On an instance of the largest retained type: if the path starts at a thread stack or the finalizer queue, not a static handle, the static-root attribution is wrong.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump later under comparable load; if the roots still retain about 250 MB and no more, this is a bounded cache, not growth."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning static field is cleared or replaced on a schedule in the application code, the retention is bounded by design."
+          }
+        ]
+      }
+    ]
+  }
+]

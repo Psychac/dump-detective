@@ -77,10 +77,60 @@ internal sealed class SqlCommandSynthesisRule : ISynthesisRule
             MetricUnit = "outstanding commands",
             DerivedFrom = derivedFrom,
             Confidence = ConfidenceBreakdown.MeasurementCertain,
+            Assertion = BuildAssertion(severity, activeCount),
+            Support =
+            [
+                new EvidenceStatement(activeIds, "Each is a command object on the heap that still references a connection."),
+                new EvidenceStatement([population.Id], "Supplies the total and detached command counts."),
+            ],
+            Counter = BuildCounter(population, activeCount, disposedCount),
+            FalsifiedBy = BuildFalsifiedBy(totalCommands),
         };
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
     }
+
+    private static Assertion BuildAssertion(Severity severity, long activeCount)
+    {
+        bool critical = severity == Severity.Critical;
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Retains,
+            Measure = ClaimParts.Count(activeCount),
+            Reference = ClaimParts.Budget(
+                ClaimParts.Count(critical ? ActiveCountCriticalThreshold : ActiveCountWarningThreshold),
+                critical ? "critical threshold" : "warning threshold"),
+            Qualifiers = new AssertionQualifiers { Location = "SQL command objects still referencing a connection" },
+        };
+    }
+
+    private static Counter BuildCounter(Observation population, long activeCount, long disposedCount) =>
+        disposedCount > activeCount
+            ? Counter.Of(new EvidenceStatement(
+                [population.Id],
+                $"{disposedCount:N0} command objects are already detached from their connection, more than the {activeCount:N0} still attached, so holding a connection is not the norm."))
+            : Counter.None("Nothing observed separates commands cached on purpose from commands leaked; only the reference to a connection is visible.");
+
+    private static IReadOnlyList<FalsificationTest> BuildFalsifiedBy(long totalCommands) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!dumpheap -live -stat -type SqlCommand",
+            Test = $"If far fewer than the reported {totalCommands:N0} command objects are live, the count includes garbage awaiting collection, not retained commands.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!gcroot <command address>",
+            Test = "On a sampled command: if its root is a short-lived request frame, not a long-lived owner such as a cache or static field, the commands are not being held.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.CodeInspection,
+            Test = "If the owning code deliberately caches prepared commands, the retention is by design, not a leak.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

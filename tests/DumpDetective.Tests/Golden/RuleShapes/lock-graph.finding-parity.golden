@@ -1,0 +1,215 @@
+rule: lock-graph.finding-parity
+version: 1
+[
+  {
+    "name": "no-contention",
+    "claims": [
+      {
+        "fingerprint": "lock graph analysis::lock-contention",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 0,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "contested monitor locks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counts 2 held inflated monitor lock(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Contention inflates a lock to a sync block, which is what was inspected, and none was contested."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !syncblk lists any monitor with waiters, contention was missed.",
+            "command": "!syncblk"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "contested-nobody-blocked",
+    "claims": [
+      {
+        "fingerprint": "lock graph analysis::lock-contention",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Blocks",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "contested monitor locks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counts 3 held inflated monitor lock(s)."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is a held monitor lock that other threads are contending for."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "No thread was recorded as blocked on these locks, so there is no sign of a wait that persists."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !syncblk shows no monitors with waiters, or a number other than 1, the contention reading is wrong.",
+            "command": "!syncblk"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "contested-one-blocked",
+    "claims": [
+      {
+        "fingerprint": "lock graph analysis::lock-contention",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Blocks",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "contested monitor locks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counts 3 held inflated monitor lock(s)."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is a held monitor lock that other threads are contending for."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "Each is a thread blocked waiting on a held lock."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[2]"
+              ],
+              "why": "Only one blocked thread was found; a circular wait needs at least two."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !syncblk shows no monitors with waiters, or a number other than 1, the contention reading is wrong.",
+            "command": "!syncblk"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "contested-two-blocked",
+    "claims": [
+      {
+        "fingerprint": "lock graph analysis::lock-contention",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Blocks",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "contested monitor locks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counts 3 held inflated monitor lock(s)."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is a held monitor lock that other threads are contending for."
+          },
+          {
+            "observations": [
+              "observations[2]",
+              "observations[3]"
+            ],
+            "why": "Each is a thread blocked waiting on a held lock."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[2]",
+                "observations[3]"
+              ],
+              "why": "Deadlock detection here is a heuristic over held sync blocks and top-frame wait patterns, not a verified wait-for graph."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !syncblk shows no monitors with waiters, or a number other than 1, the contention reading is wrong.",
+            "command": "!syncblk"
+          },
+          {
+            "kind": "Windbg",
+            "test": "If !dlk finds no wait cycle among threads 11, 12, they are blocked but not deadlocked.",
+            "command": "!dlk"
+          }
+        ]
+      }
+    ]
+  }
+]

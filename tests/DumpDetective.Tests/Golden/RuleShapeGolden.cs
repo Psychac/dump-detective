@@ -87,23 +87,24 @@ internal static class RuleShapeGolden
         var described = new List<object>(scenarios.Count);
         foreach (Scenario scenario in scenarios)
         {
-            var positions = new Dictionary<ObservationId, string>();
+            var positions = new Dictionary<ObservationId, int>();
             for (int i = 0; i < scenario.Observations.Count; i++)
-                positions[scenario.Observations[i].Id] = $"observations[{i}]";
+                positions[scenario.Observations[i].Id] = i;
 
             IReadOnlyList<Claim> claims = await rule.SynthesizeAsync(new ObservationMatchSet(scenario.Observations), new SynthesisContext());
             var claimShapes = new List<object>(claims.Count);
             foreach (Claim claim in claims)
             {
+                AssertClaimIsWellFormed(rule, scenario.Name, claim);
                 claimShapes.Add(new
                 {
                     claim.Fingerprint,
                     claim.Severity,
                     claim.Assertion,
-                    support = claim.Support.Select(s => new { observations = s.Observations.Select(id => positions[id]), s.Why }),
+                    support = claim.Support.Select(s => new { observations = Describe(s.Observations, positions), s.Why }),
                     counter = claim.Counter is null ? null : new
                     {
-                        statements = claim.Counter.Statements.Select(s => new { observations = s.Observations.Select(id => positions[id]), s.Why }),
+                        statements = claim.Counter.Statements.Select(s => new { observations = Describe(s.Observations, positions), s.Why }),
                         claim.Counter.NoneFoundBecause,
                     },
                     claim.FalsifiedBy,
@@ -115,6 +116,66 @@ internal static class RuleShapeGolden
 
         string body = JsonSerializer.Serialize(described, JsonOptions);
         return $"rule: {rule.RuleId}\nversion: {rule.Version}\n{body}\n";
+    }
+
+    // The plan's per-claim gates (docs/ReportStructure/m1-claims-plan.md step 4), applied to every migrated rule:
+    // a claim must say what would prove it wrong, say whether counter-evidence was examined, cite support, and
+    // cite only observations that are part of its own lineage.
+    private static void AssertClaimIsWellFormed(ISynthesisRule rule, string scenarioName, Claim claim)
+    {
+        string where = $"rule '{rule.RuleId}', scenario '{scenarioName}'";
+
+        if (claim.Assertion is null)
+            throw new XunitException($"{where}: claim has no assertion.");
+        if (claim.FalsifiedBy.Count == 0)
+            throw new XunitException($"{where}: claim names no falsification test.");
+        if (claim.FalsifiedBy.Any(test => string.IsNullOrWhiteSpace(test.Test)))
+            throw new XunitException($"{where}: a falsification test has no text.");
+        if (claim.Counter is null)
+            throw new XunitException($"{where}: counter-evidence was neither stated nor explicitly marked none.");
+        if (claim.Counter.Statements.Count == 0 && string.IsNullOrWhiteSpace(claim.Counter.NoneFoundBecause))
+            throw new XunitException($"{where}: counter is empty without saying why none was found.");
+        if (claim.Support.Count == 0)
+            throw new XunitException($"{where}: claim cites no support.");
+
+        var lineage = new HashSet<ObservationId>(claim.DerivedFrom);
+        foreach (EvidenceStatement statement in claim.Support.Concat(claim.Counter.Statements))
+        {
+            if (statement.Observations.Count == 0)
+                throw new XunitException($"{where}: evidence statement '{statement.Why}' cites no observations.");
+            foreach (ObservationId id in statement.Observations)
+            {
+                if (!lineage.Contains(id))
+                    throw new XunitException($"{where}: evidence statement '{statement.Why}' cites an observation outside the claim's DerivedFrom.");
+            }
+        }
+    }
+
+    // Runs of three or more consecutive positions collapse to a range, so a claim citing a thousand
+    // observations stays reviewable instead of filling the golden with a thousand lines.
+    private static List<string> Describe(IReadOnlyList<ObservationId> ids, Dictionary<ObservationId, int> positions)
+    {
+        var described = new List<string>();
+        int index = 0;
+        while (index < ids.Count)
+        {
+            int runEnd = index;
+            while (runEnd + 1 < ids.Count && positions[ids[runEnd + 1]] == positions[ids[runEnd]] + 1)
+                runEnd++;
+
+            if (runEnd - index >= 2)
+            {
+                described.Add($"observations[{positions[ids[index]]}..{positions[ids[runEnd]]}]");
+                index = runEnd + 1;
+            }
+            else
+            {
+                described.Add($"observations[{positions[ids[index]]}]");
+                index++;
+            }
+        }
+
+        return described;
     }
 
     private static (int Version, string Shape) Parse(string golden)

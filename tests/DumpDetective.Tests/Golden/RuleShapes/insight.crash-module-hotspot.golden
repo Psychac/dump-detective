@@ -1,0 +1,186 @@
+rule: insight.crash-module-hotspot
+version: 1
+[
+  {
+    "name": "large-on-disk",
+    "claims": [
+      {
+        "fingerprint": "insightengine::crash-module-hotspot",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 85.71428571428571,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "dominant-share threshold"
+          },
+          "qualifiers": {
+            "mechanism": "large on disk",
+            "location": "active exceptions attributed to module Contoso.Core"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Module \u0027Contoso.Core\u0027 owns 6 of 7 attributed active exceptions."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "The module\u0027s on-disk footprint."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The module that hosts the failing request path owns most exceptions whatever its size or versioning; the correlation does not show either causes them."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On threads carrying the attributed exceptions: if their top frames are not in \u0027Contoso.Core\u0027, the attribution is wrong.",
+            "command": "!pe"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If \u0027Contoso.Core\u0027 is simply the application\u0027s request-handling module, concentration there is expected."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "in-conflict",
+    "claims": [
+      {
+        "fingerprint": "insightengine::crash-module-hotspot",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 100,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "dominant-share threshold"
+          },
+          "qualifiers": {
+            "mechanism": "in a version conflict",
+            "location": "active exceptions attributed to module Contoso.Core"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Module \u0027Contoso.Core\u0027 owns 6 of 6 attributed active exceptions."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The module is part of an assembly version conflict group."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The module that hosts the failing request path owns most exceptions whatever its size or versioning; the correlation does not show either causes them."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On threads carrying the attributed exceptions: if their top frames are not in \u0027Contoso.Core\u0027, the attribution is wrong.",
+            "command": "!pe"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If \u0027Contoso.Core\u0027 is simply the application\u0027s request-handling module, concentration there is expected."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "exactly-half-is-still-dominant",
+    "claims": [
+      {
+        "fingerprint": "insightengine::crash-module-hotspot",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 50,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "dominant-share threshold"
+          },
+          "qualifiers": {
+            "mechanism": "in a version conflict",
+            "location": "active exceptions attributed to module Contoso.Core"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Module \u0027Contoso.Core\u0027 owns 3 of 6 attributed active exceptions."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "The module is part of an assembly version conflict group."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The module that hosts the failing request path owns most exceptions whatever its size or versioning; the correlation does not show either causes them."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On threads carrying the attributed exceptions: if their top frames are not in \u0027Contoso.Core\u0027, the attribution is wrong.",
+            "command": "!pe"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If \u0027Contoso.Core\u0027 is simply the application\u0027s request-handling module, concentration there is expected."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-half-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "uncorrelated-says-nothing",
+    "claims": []
+  }
+]

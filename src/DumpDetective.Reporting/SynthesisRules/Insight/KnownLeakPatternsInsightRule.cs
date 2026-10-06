@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -73,6 +74,29 @@ internal sealed class KnownLeakPatternsInsightRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = "insightengine::sqlclient-tdsparser-closure",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(tdsClosureCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(TdsClosureThreshold), "closure-count threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "TdsParser compiler-generated closures", Mechanism = "async SqlCommand continuations on .NET Framework SqlClient" },
+                },
+                Support = [new EvidenceStatement(tdsDerivedFrom, $"{tdsClosureCount:N0} TdsParser closure objects are on the heap.")],
+                Counter = Counter.None("The closures are counted on the heap; nothing observed shows they are retained by abandoned connections, not waiting on collection."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <closure address>",
+                        Test = "On a sampled closure: if !gcroot finds no root, it is garbage awaiting collection, not retained.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the application already uses Microsoft.Data.SqlClient, the .NET Framework pattern does not apply.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -96,6 +120,28 @@ internal sealed class KnownLeakPatternsInsightRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = "insightengine::uncached-reflection-metadata",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(reflectionCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(ReflectionThreshold), "reflection-metadata threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "RuntimeMethodInfo, RuntimePropertyInfo and RuntimeFieldInfo objects", Mechanism = "reflection results not cached" },
+                },
+                Support = [new EvidenceStatement(reflectionDerivedFrom, $"{reflectionCount:N0} reflection metadata objects are on the heap.")],
+                Counter = Counter.None("The runtime caches some metadata objects itself, so a large count does not by itself show the application's reflection results are uncached."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the metadata count does not grow, the objects are cached, not allocated per call.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the reflection calls run once at startup and their results are stored, the objects are a fixed set.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Warning,

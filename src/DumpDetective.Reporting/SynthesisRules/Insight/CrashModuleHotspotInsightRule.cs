@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -112,6 +113,38 @@ internal sealed class CrashModuleHotspotInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::crash-module-hotspot",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Dominates,
+                    Measure = ClaimParts.Percent(topModuleSharePct),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(DominantSharePct), "dominant-share threshold"),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = $"active exceptions attributed to module {topModuleName}",
+                        Mechanism = hasSizeMatch && inConflict ? "large on disk and in a version conflict" : hasSizeMatch ? "large on disk" : "in a version conflict",
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement(moduleActiveObservations[topModuleName], $"Module '{topModuleName}' owns {topModuleCount:N0} of {attributedActiveExceptions:N0} attributed active exceptions."),
+                    .. hasSizeMatch ? [new EvidenceStatement([sizeMatch!.Id], "The module's on-disk footprint.")] : Array.Empty<EvidenceStatement>(),
+                    .. inConflict ? [new EvidenceStatement([conflictObservationId], "The module is part of an assembly version conflict group.")] : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("The module that hosts the failing request path owns most exceptions whatever its size or versioning; the correlation does not show either causes them."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!pe",
+                        Test = $"On threads carrying the attributed exceptions: if their top frames are not in '{topModuleName}', the attribution is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = $"If '{topModuleName}' is simply the application's request-handling module, concentration there is expected.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Crash",
                 Severity = inConflict ? Severity.Warning : Severity.Info,

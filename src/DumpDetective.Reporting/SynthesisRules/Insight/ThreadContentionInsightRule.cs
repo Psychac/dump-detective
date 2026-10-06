@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -63,6 +64,37 @@ internal sealed class ThreadContentionInsightRule : ISynthesisRule
                 new Claim
                 {
                     Fingerprint = "insightengine::thread-contention-hang",
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Stalls,
+                        Measure = ClaimParts.Percent(waitingPercent),
+                        Reference = severity == Severity.Critical
+                            ? ClaimParts.Budget(ClaimParts.Percent(CriticalPct), "critical threshold")
+                            : ClaimParts.Budget(ClaimParts.Percent(WarningPct), "warning threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "alive threads in a wait state" },
+                    },
+                    Support =
+                    [
+                        new EvidenceStatement([hang.Id], $"{waitingThreadCount} threads are waiting, {waitingPercent:F1}% of the total."),
+                        .. threadTriage is not null
+                            ? [new EvidenceStatement([threadTriage.Id], $"{lockHoldingThreadCount} threads hold locks.")]
+                            : Array.Empty<EvidenceStatement>(),
+                    ],
+                    Counter = Counter.None("Waiting threads include idle thread-pool workers; the waiting share does not separate idle waits from stalled ones."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!threadpool",
+                            Test = $"If most of the {waitingThreadCount} waiting threads are idle pool workers, the share is spare capacity, not a stall.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Capture,
+                            Test = "Capture a second dump a few minutes later; if different threads are waiting at different frames, the waits are short-lived churn.",
+                        },
+                    ],
                     Analyzer = "InsightEngine",
                     Category = "Threads",
                     Severity = severity,
@@ -98,6 +130,41 @@ internal sealed class ThreadContentionInsightRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = "insightengine::thread-contention-blocked",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Blocks,
+                    Measure = ClaimParts.Percent(blockedPct),
+                    Reference = severity == Severity.Critical
+                        ? ClaimParts.Budget(ClaimParts.Percent(CriticalPct), "critical threshold")
+                        : ClaimParts.Budget(ClaimParts.Percent(WarningPct), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "alive threads in a blocked pattern",
+                        Mechanism = finalizerThreadBlocked ? "the finalizer thread is blocked" : null,
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([threadTriage.Id], $"{blocked} of {alive} alive threads are blocked; {lockHoldingThreadCount} hold locks."),
+                    .. finalizerThread is not null
+                        ? [new EvidenceStatement([finalizerThread.Id], finalizerThreadBlocked ? "The finalizer thread is blocked." : "The finalizer thread is not blocked.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("Idle thread-pool workers parked on a wait count as blocked; nothing observed separates idle waits from stalled ones."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!threadpool",
+                        Test = $"If most of the {blocked} blocked threads are idle pool workers, the ratio reflects spare capacity, not starvation.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump a few minutes later; if the blocked threads are different ones at different frames, the waits are short-lived churn.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Threads",
                 Severity = severity,
@@ -122,6 +189,29 @@ internal sealed class ThreadContentionInsightRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = "insightengine::thread-contention-finalizer-blocked",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Blocks,
+                    Subject = finalizerThread.Subjects[0],
+                    Measure = ClaimParts.Count(lockCount),
+                    Qualifiers = new AssertionQualifiers { Location = "the finalizer thread", Mechanism = "a held lock" },
+                },
+                Support = [new EvidenceStatement([finalizerThread.Id], $"The finalizer thread (OS thread {osThreadId}) is blocked while holding {lockCount} lock(s).")],
+                Counter = Counter.None("A thread seen blocked at capture time may be about to resume; one snapshot cannot show the wait is permanent."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!clrstack",
+                        Test = $"On OS thread {osThreadId}: if its stack is not parked on a wait or lock, it is not blocked.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump a few minutes later; if the finalizer thread has moved on and the finalizer queue is draining, the block was transient.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Threads",
                 Severity = Severity.Critical,

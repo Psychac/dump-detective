@@ -1,0 +1,279 @@
+rule: insight.thread-contention
+version: 1
+[
+  {
+    "name": "hang-pressure-critical",
+    "claims": [
+      {
+        "fingerprint": "insightengine::thread-contention-hang",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 80,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 75,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads in a wait state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "80 threads are waiting, 80.0% of the total."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "1 threads hold locks."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Waiting threads include idle thread-pool workers; the waiting share does not separate idle waits from stalled ones."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the 80 waiting threads are idle pool workers, the share is spare capacity, not a stall.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if different threads are waiting at different frames, the waits are short-lived churn."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "blocked-warning-with-finalizer-running",
+    "claims": [
+      {
+        "fingerprint": "insightengine::thread-contention-blocked",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Blocks",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads in a blocked pattern"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "6 of 10 alive threads are blocked; 1 hold locks."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer thread is not blocked."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Idle thread-pool workers parked on a wait count as blocked; nothing observed separates idle waits from stalled ones."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the 6 blocked threads are idle pool workers, the ratio reflects spare capacity, not starvation.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the blocked threads are different ones at different frames, the waits are short-lived churn."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "blocked-critical-with-finalizer-blocked",
+    "claims": [
+      {
+        "fingerprint": "insightengine::thread-contention-blocked",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Blocks",
+          "measure": {
+            "value": 80,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 75,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "mechanism": "the finalizer thread is blocked",
+            "location": "alive threads in a blocked pattern"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "8 of 10 alive threads are blocked; 1 hold locks."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer thread is blocked."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Idle thread-pool workers parked on a wait count as blocked; nothing observed separates idle waits from stalled ones."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the 8 blocked threads are idle pool workers, the ratio reflects spare capacity, not starvation.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the blocked threads are different ones at different frames, the waits are short-lived churn."
+          }
+        ]
+      },
+      {
+        "fingerprint": "insightengine::thread-contention-finalizer-blocked",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Blocks",
+          "subject": {
+            "$kind": "thread",
+            "kind": "Thread",
+            "osThreadId": 4100,
+            "managedThreadId": 4100,
+            "joinKey": "4100",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "a held lock",
+            "location": "the finalizer thread"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer thread (OS thread 4100) is blocked while holding 2 lock(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A thread seen blocked at capture time may be about to resume; one snapshot cannot show the wait is permanent."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On OS thread 4100: if its stack is not parked on a wait or lock, it is not blocked.",
+            "command": "!clrstack"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the finalizer thread has moved on and the finalizer queue is draining, the block was transient."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "finalizer-blocked-alone",
+    "claims": [
+      {
+        "fingerprint": "insightengine::thread-contention-finalizer-blocked",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Blocks",
+          "subject": {
+            "$kind": "thread",
+            "kind": "Thread",
+            "osThreadId": 4100,
+            "managedThreadId": 4100,
+            "joinKey": "4100",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "a held lock",
+            "location": "the finalizer thread"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer thread (OS thread 4100) is blocked while holding 2 lock(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A thread seen blocked at capture time may be about to resume; one snapshot cannot show the wait is permanent."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On OS thread 4100: if its stack is not parked on a wait or lock, it is not blocked.",
+            "command": "!clrstack"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the finalizer thread has moved on and the finalizer queue is draining, the block was transient."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "quiet-says-nothing",
+    "claims": []
+  }
+]

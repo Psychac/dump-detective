@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -217,6 +218,40 @@ internal sealed class ClusterHangCorrelationInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::cluster-hang-correlation",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Stalls,
+                    Measure = ClaimParts.Count(overlapCount),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "threads sharing the dominant stack signature that are also waiting",
+                        Mechanism = dominantWaitReason is null ? null : $"waiting on {dominantWaitReason}",
+                        Scope = $"{dominantPercentOfAlive:F1}% of alive threads share the signature",
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([dominantCluster.Id, .. dominantMembers.Select(m => m.Id)], $"{dominantCount:N0} threads share the stack signature; {dominantMembers.Count} were sampled."),
+                    new EvidenceStatement(overlappingOsThreadIds.Select(id => waitingByOsThreadId[id].Id).ToList(), $"{overlapCount} of the sampled threads are also reported as waiting by the Hang analyzer."),
+                    .. overlappingDeadlockCandidateCount > 0
+                        ? [new EvidenceStatement(overlappingOsThreadIds.Where(blockedByOsThreadId.ContainsKey).Select(id => blockedByOsThreadId[id].Id).ToList(), $"{overlappingDeadlockCandidateCount} of them are also flagged as deadlock candidates.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("Idle thread-pool workers share a stack and wait state by design; sharing a signature does not show a contended resource."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!clrstack",
+                        Test = $"On sampled threads from the cluster: if the shared frame '{signature}' is a deliberate wait such as a queue consumer, there is no bottleneck.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump a few minutes later; if different threads are waiting at different frames, the shared signature was transient.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Threads",
                 Severity = severity,

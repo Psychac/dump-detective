@@ -1,0 +1,163 @@
+rule: insight.address-space-pressure
+version: 1
+[
+  {
+    "name": "ratio-and-ephemeral-fill",
+    "claims": [
+      {
+        "fingerprint": "insightengine::address-space-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 5,
+            "unit": "Ratio",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 4,
+              "unit": "Ratio",
+              "semantics": "Ratio"
+            },
+            "basis": "high-pressure threshold"
+          },
+          "qualifiers": {
+            "location": "managed heap virtual address space"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Reserved-to-committed ratio 5.0x (\u003E4x threshold). GC is holding large uncommitted reservations."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Reserved address space is not committed memory; a large reservation matters only if the process nears its address-space limit."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the reserved total in !address -summary is far from 6.00 GB, the reservation figure is wrong.",
+            "command": "!address -summary"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the process sets a GC heap hard limit, the reservation is capped by design, not unbounded."
+          }
+        ]
+      },
+      {
+        "fingerprint": "insightengine::address-space-ephemeral-fill",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 95,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 90,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical fill threshold"
+          },
+          "qualifiers": {
+            "location": "2 ephemeral segment(s)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Average ephemeral fill is 95.0% across 2 segment(s)."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "12 segments exist across the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Ephemeral segments fill and are collected in the normal allocation cycle; a high fill just before a GC is expected."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the ephemeral segments in !eeheap -gc show substantial unused allocation space, the 95.0% fill is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump; if the ephemeral fill is low after a GC, the first reading was the point before collection."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "32-bit-by-reservation",
+    "claims": [
+      {
+        "fingerprint": "insightengine::address-space-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 1,
+            "unit": "Ratio",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 4,
+              "unit": "Ratio",
+              "semantics": "Ratio"
+            },
+            "basis": "high-pressure threshold"
+          },
+          "qualifiers": {
+            "mechanism": "a 32-bit process",
+            "location": "managed heap virtual address space"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "32-bit process has 3,072 MB reserved (\u003E1,907 MB threshold)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Reserved address space is not committed memory; a large reservation matters only if the process nears its address-space limit."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the reserved total in !address -summary is far from 3.00 GB, the reservation figure is wrong.",
+            "command": "!address -summary"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the process sets a GC heap hard limit, the reservation is capped by design, not unbounded."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "quiet-says-nothing",
+    "claims": []
+  }
+]

@@ -1,0 +1,117 @@
+rule: insight.cluster-hang-correlation
+version: 1
+[
+  {
+    "name": "overlap-with-diversity",
+    "claims": [
+      {
+        "fingerprint": "insightengine::cluster-hang-correlation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "waiting on Waiting to acquire monitor lock",
+            "location": "threads sharing the dominant stack signature that are also waiting",
+            "scope": "30.0% of alive threads share the signature"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..3]"
+            ],
+            "why": "30 threads share the stack signature; 3 were sampled."
+          },
+          {
+            "observations": [
+              "observations[4..6]"
+            ],
+            "why": "3 of the sampled threads are also reported as waiting by the Hang analyzer."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Idle thread-pool workers share a stack and wait state by design; sharing a signature does not show a contended resource."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On sampled threads from the cluster: if the shared frame \u0027App.Service.Wait\u0027 is a deliberate wait such as a queue consumer, there is no bottleneck.",
+            "command": "!clrstack"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if different threads are waiting at different frames, the shared signature was transient."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "overlap-with-a-deadlock-candidate",
+    "claims": [
+      {
+        "fingerprint": "insightengine::cluster-hang-correlation",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "waiting on Waiting to acquire monitor lock",
+            "location": "threads sharing the dominant stack signature that are also waiting",
+            "scope": "60.0% of alive threads share the signature"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..2]"
+            ],
+            "why": "60 threads share the stack signature; 2 were sampled."
+          },
+          {
+            "observations": [
+              "observations[3]",
+              "observations[4]"
+            ],
+            "why": "2 of the sampled threads are also reported as waiting by the Hang analyzer."
+          },
+          {
+            "observations": [
+              "observations[5]"
+            ],
+            "why": "1 of them are also flagged as deadlock candidates."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Idle thread-pool workers share a stack and wait state by design; sharing a signature does not show a contended resource."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On sampled threads from the cluster: if the shared frame \u0027App.Service.Wait\u0027 is a deliberate wait such as a queue consumer, there is no bottleneck.",
+            "command": "!clrstack"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if different threads are waiting at different frames, the shared signature was transient."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "too-little-overlap-says-nothing",
+    "claims": []
+  }
+]

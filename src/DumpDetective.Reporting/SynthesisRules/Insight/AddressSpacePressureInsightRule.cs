@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -59,6 +60,29 @@ internal sealed class AddressSpacePressureInsightRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = "insightengine::address-space-pressure",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Ratio(ratio),
+                    Reference = ClaimParts.Budget(ClaimParts.Ratio(ratioHighThreshold), "high-pressure threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "managed heap virtual address space", Mechanism = dumpPointerSize == 4 ? "a 32-bit process" : null },
+                },
+                Support = [new EvidenceStatement([segReservation.Id], pressureReason)],
+                Counter = Counter.None("Reserved address space is not committed memory; a large reservation matters only if the process nears its address-space limit."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!address -summary",
+                        Test = $"If the reserved total in !address -summary is far from {InsightByteFormat.FormatBytes(totalReserved)}, the reservation figure is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the process sets a GC heap hard limit, the reservation is capped by design, not unbounded.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -91,6 +115,35 @@ internal sealed class AddressSpacePressureInsightRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = "insightengine::address-space-ephemeral-fill",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(avgEphemeralFillPct),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(EphemeralFillCriticalPct), "critical fill threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"{ephemeralSegmentCount} ephemeral segment(s)" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([segReservation.Id], $"Average ephemeral fill is {avgEphemeralFillPct:F1}% across {ephemeralSegmentCount} segment(s)."),
+                    .. segments is not null
+                        ? [new EvidenceStatement([segments.Id], $"{totalSegments} segments exist across the heap.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("Ephemeral segments fill and are collected in the normal allocation cycle; a high fill just before a GC is expected."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the ephemeral segments in !eeheap -gc show substantial unused allocation space, the {avgEphemeralFillPct:F1}% fill is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump; if the ephemeral fill is low after a GC, the first reading was the point before collection.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Warning,

@@ -190,7 +190,7 @@ internal static class RuleShapeGolden
 
     private static string Normalize(string value) => value.Replace("\r\n", "\n").TrimEnd();
 
-    private static string FindGoldenDirectory()
+    internal static string FindGoldenDirectory()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);
         while (current is not null)

@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -70,6 +71,41 @@ internal sealed class AllocationPressureCrossCorrelationInsightRule : ISynthesis
                 new Claim
                 {
                     Fingerprint = "insightengine::allocation-pressure-critical",
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Exceeds,
+                        Measure = new Measure(ComputePressureScore(gen0CountPct, gen2CountPct, lohSizePct), MeasureUnit.Custom, MeasureSemantics.Ratio),
+                        Reference = ClaimParts.Budget(new Measure(70.0, MeasureUnit.Custom, MeasureSemantics.Ratio), "critical pressure threshold"),
+                        Qualifiers = new AssertionQualifiers
+                        {
+                            Location = "GC pressure score",
+                            Mechanism = threadImpact ? $"{profile} allocation profile with many blocked threads" : $"{profile} allocation profile",
+                        },
+                    },
+                    Support =
+                    [
+                        new EvidenceStatement([allocPattern.Id], $"Gen0 holds {gen0CountPct:F1}% of objects ({gen0SizePct:F1}% of size); the promotion pressure score is {promotionPressureScore:F2}."),
+                        .. threadImpact
+                            ? [new EvidenceStatement([threadTriage!.Id], "A large share of alive threads is blocked, which GC pauses can contribute to.")]
+                            : Array.Empty<EvidenceStatement>(),
+                    ],
+                    Counter = profile == AllocationProfile.Transient
+                        ? Counter.Of(new EvidenceStatement([allocPattern.Id], $"{gen0CountPct:F1}% of objects are in Gen0, which is cheap to collect, so the pressure may be allocation churn, not retention."))
+                        : Counter.None("The score combines generation and LOH shares from one snapshot; nothing observed shows whether Gen2 is growing or stable."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!eeheap -gc",
+                            Test = $"If the Gen2 and LOH sizes in !eeheap -gc do not match a {gen2CountPct:F1}% Gen2 object share and {lohSizePct:F1}% LOH byte share, the composition is wrong.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Capture,
+                            Test = "Capture a second dump under comparable load; if the Gen2 share does not grow, the pressure is steady state, not accumulation.",
+                        },
+                    ],
                     Analyzer = "InsightEngine",
                     Category = "Memory",
                     Severity = Severity.Critical,
@@ -96,6 +132,31 @@ internal sealed class AllocationPressureCrossCorrelationInsightRule : ISynthesis
                 new Claim
                 {
                     Fingerprint = "insightengine::allocation-pressure-high",
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Exceeds,
+                        Measure = new Measure(ComputePressureScore(gen0CountPct, gen2CountPct, lohSizePct), MeasureUnit.Custom, MeasureSemantics.Ratio),
+                        Reference = ClaimParts.Budget(new Measure(45.0, MeasureUnit.Custom, MeasureSemantics.Ratio), "high pressure threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "GC pressure score", Mechanism = $"{profile} allocation profile" },
+                    },
+                    Support = [new EvidenceStatement([allocPattern.Id], $"Gen0 holds {gen0CountPct:F1}% of objects; the promotion pressure score is {promotionPressureScore:F2}.")],
+                    Counter = profile == AllocationProfile.Transient
+                        ? Counter.Of(new EvidenceStatement([allocPattern.Id], $"{gen0CountPct:F1}% of objects are in Gen0, which is cheap to collect, so the pressure may be allocation churn, not retention."))
+                        : Counter.None("The score combines generation and LOH shares from one snapshot; nothing observed shows whether Gen2 is growing or stable."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!eeheap -gc",
+                            Test = $"If the Gen2 and LOH sizes in !eeheap -gc do not match a {gen2CountPct:F1}% Gen2 object share and {lohSizePct:F1}% LOH byte share, the composition is wrong.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Capture,
+                            Test = "Capture a second dump under comparable load; if the Gen2 share does not grow, the pressure is steady state, not accumulation.",
+                        },
+                    ],
                     Analyzer = "InsightEngine",
                     Category = "Memory",
                     Severity = Severity.Warning,

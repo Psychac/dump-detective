@@ -1,0 +1,158 @@
+rule: insight.known-leak-patterns
+version: 1
+[
+  {
+    "name": "both-patterns",
+    "claims": [
+      {
+        "fingerprint": "insightengine::sqlclient-tdsparser-closure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 1500,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 1000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "closure-count threshold"
+          },
+          "qualifiers": {
+            "mechanism": "async SqlCommand continuations on .NET Framework SqlClient",
+            "location": "TdsParser compiler-generated closures"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,500 TdsParser closure objects are on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The closures are counted on the heap; nothing observed shows they are retained by abandoned connections, not waiting on collection."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled closure: if !gcroot finds no root, it is garbage awaiting collection, not retained.",
+            "command": "!gcroot \u003Cclosure address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the application already uses Microsoft.Data.SqlClient, the .NET Framework pattern does not apply."
+          }
+        ]
+      },
+      {
+        "fingerprint": "insightengine::uncached-reflection-metadata",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "reflection-metadata threshold"
+          },
+          "qualifiers": {
+            "mechanism": "reflection results not cached",
+            "location": "RuntimeMethodInfo, RuntimePropertyInfo and RuntimeFieldInfo objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "60,000 reflection metadata objects are on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The runtime caches some metadata objects itself, so a large count does not by itself show the application\u0027s reflection results are uncached."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the metadata count does not grow, the objects are cached, not allocated per call."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the reflection calls run once at startup and their results are stored, the objects are a fixed set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "closures-only",
+    "claims": [
+      {
+        "fingerprint": "insightengine::sqlclient-tdsparser-closure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 1500,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 1000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "closure-count threshold"
+          },
+          "qualifiers": {
+            "mechanism": "async SqlCommand continuations on .NET Framework SqlClient",
+            "location": "TdsParser compiler-generated closures"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,500 TdsParser closure objects are on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The closures are counted on the heap; nothing observed shows they are retained by abandoned connections, not waiting on collection."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled closure: if !gcroot finds no root, it is garbage awaiting collection, not retained.",
+            "command": "!gcroot \u003Cclosure address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the application already uses Microsoft.Data.SqlClient, the .NET Framework pattern does not apply."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-thresholds-says-nothing",
+    "claims": []
+  }
+]

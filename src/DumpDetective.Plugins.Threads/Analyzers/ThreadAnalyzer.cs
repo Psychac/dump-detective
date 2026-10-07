@@ -29,9 +29,13 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     [RequiresCapability(CapabilityVocabulary.RuntimeThreads)]
     [OptionalCapability(CapabilityVocabulary.TraceThreadTimeline)]
     [OptionalCapability(CapabilityVocabulary.TraceContentionEvents)]
+    [OptionalCapability(CapabilityVocabulary.HeapDominators)]
     public sealed class ThreadAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
     {
+        private static readonly HashSet<Capability> ThreadRetentionCapabilities =
+            new() { CapabilityVocabulary.RuntimeThreads, CapabilityVocabulary.HeapDominators };
+
         private readonly ThreadStackScanState _scanState = new();
         private IHeapAnalysisCache? _cache;
 
@@ -204,6 +208,36 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             }
         }
 
+        // Silent when the dominator tree wasn't built or the thread had no stack roots: an absent observation
+        // reads as "not measured", where emitting 0 would claim the thread keeps nothing alive.
+        private static async ValueTask EmitThreadRetentionAsync(
+            RuntimeThreadRef thread, AnalysisContext observationContext, CancellationToken cancellationToken)
+        {
+            if (observationContext.HeapDominators is not { } dominators
+                || !dominators.TryGetThreadRetainedSize(thread.Thread.OsThreadId, out ulong retainedBytes))
+                return;
+
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "thread.retained-bytes",
+                Subjects = [thread.Thread],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["retained.bytes"] = new Measure(retainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Thread Analysis",
+                    CapabilitiesUsed = ThreadRetentionCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
         // Shared per-thread categorization body.
         private static async ValueTask ProcessThread(
             RuntimeThreadRef thread,
@@ -335,6 +369,8 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                     },
                     Confidence = 1.0,
                 }, cancellationToken);
+
+                await EmitThreadRetentionAsync(thread, observationContext, cancellationToken);
 
                 bool isAlreadyCaptured = thread.LockCount > 0 || waitClassification != null || thread.HasCurrentException;
                 if (!isAlreadyCaptured)

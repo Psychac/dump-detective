@@ -5,6 +5,7 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
 
 using FluentAssertions;
 
@@ -252,6 +253,73 @@ public sealed class ThreadAnalyzerRetypingCharacterizationTests
     {
         ThreadAnalyzer.WaitPatternsForTesting.Should().Contain(p => p.Category == "MonitorWait");
         ThreadAnalyzer.WaitPatternsForTesting.Should().Contain(p => p.Category == "TaskBlocking");
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_WithThreadRetention_EmitsRetainedBytesOnlyForThreadsTheTreeKnows()
+    {
+        var threads = new FakeRuntimeThreadQuery();
+        threads.AddThread(Thread(osId: 1, isAlive: true));
+        threads.AddThread(Thread(osId: 2, isAlive: true));
+        var dominators = new FakeThreadRetentionDominatorQuery();
+        dominators.SetRetainedBytes(osThreadId: 1, bytes: 4096);
+
+        IReadOnlyList<Observation> observations = await AnalyzeCollectingObservations(threads, dominators);
+
+        Observation retained = observations.Should().ContainSingle(o => o.ObservationType == "thread.retained-bytes").Which;
+        retained.Subjects.Should().ContainSingle().Which.JoinKey.Should().Be("1");
+        retained.Measures["retained.bytes"].Value.Should().Be(4096);
+        retained.Provenance.CapabilitiesUsed.Should().Contain(CapabilityVocabulary.HeapDominators);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_ThreadWithNoStackRoots_EmitsNoRetentionObservationRatherThanZero()
+    {
+        var threads = new FakeRuntimeThreadQuery();
+        threads.AddThread(Thread(osId: 7, isAlive: true));
+
+        IReadOnlyList<Observation> observations = await AnalyzeCollectingObservations(threads, new FakeThreadRetentionDominatorQuery());
+
+        observations.Should().NotContain(o => o.ObservationType == "thread.retained-bytes");
+        observations.Should().Contain(o => o.ObservationType == "thread.state");
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_WithoutDominatorTree_EmitsNoRetentionObservations()
+    {
+        var threads = new FakeRuntimeThreadQuery();
+        threads.AddThread(Thread(osId: 1, isAlive: true));
+
+        IReadOnlyList<Observation> observations = await AnalyzeCollectingObservations(threads, dominators: null);
+
+        observations.Should().NotContain(o => o.ObservationType == "thread.retained-bytes");
+    }
+
+    private static async Task<IReadOnlyList<Observation>> AnalyzeCollectingObservations(
+        FakeRuntimeThreadQuery threads, IHeapDominatorQuery? dominators)
+    {
+        var sink = new CollectingObservationSink();
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
+            Observations = sink,
+            ArtifactId = new ArtifactId("test"),
+            RuntimeThreads = threads,
+            HeapDominators = dominators,
+        };
+
+        await new ThreadAnalyzer().AnalyzeAsync(context, CancellationToken.None);
+        return sink.Observations;
+    }
+
+    private sealed class FakeThreadRetentionDominatorQuery : IHeapDominatorQuery
+    {
+        private readonly Dictionary<uint, ulong> _retainedByThread = new();
+        public void SetRetainedBytes(uint osThreadId, ulong bytes) => _retainedByThread[osThreadId] = bytes;
+
+        public bool TryGetThreadRetainedSize(uint osThreadId, out ulong retainedBytes) => _retainedByThread.TryGetValue(osThreadId, out retainedBytes);
+        public bool TryGetRetainedSize(ulong address, out ulong retainedBytes) { retainedBytes = 0; return false; }
+        public bool TryGetImmediateDominator(ulong address, out ulong dominatorAddress) { dominatorAddress = 0; return false; }
+        public IEnumerable<HeapObjectRef> EnumerateRetainedObjects(ulong rootAddress) => [];
+        public bool TryGetRetainedBytesByType(TypeRef type, out ulong retainedBytes) { retainedBytes = 0; return false; }
     }
 
     private static RuntimeThreadRef Thread(

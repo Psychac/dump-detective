@@ -97,6 +97,7 @@ public sealed class SdkRegistryConformanceTests
             ["thread.wait-state"] = ["locks-held.count", "circular-wait-candidate.count"],
             ["runtime.hang-pressure"] = ["alive-thread.count", "waiting-thread.count", "waiting.percent", "queued-work-items.count", "pending-task.count", "faulted-task.count", "task-continuation.count", "threadpool-max.count", "threadpool-active.count", "threadpool-cpu.percent", "high-threadpool-threshold.count"],
             ["thread.state"] = ["stack-size.bytes", "locks-held.count", "stack-root.count", "has-exception", "async-chain.depth"],
+            ["thread.retained-bytes"] = ["retained.bytes"],
             ["runtime.thread-triage"] = ["alive-thread.count", "blocked-thread.count", "lock-holding-thread.count", "active-exception-thread.count", "active-processing-thread.count", "async-chain-thread.count", "max-async-chain.depth"],
             ["runtime.finalizer-thread"] = ["is-blocked", "locks-held.count"],
             ["thread.stack-cluster"] = ["cluster.count", "threadpool-worker.count", "gc.count", "finalizer.count"],

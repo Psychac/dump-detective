@@ -181,8 +181,22 @@ sequencing, what exists today, and decisions before starting.
        generation", Crash "Inner Type" (placeholder dashes), Async Task "Result Type" and "Exception Type" (no matches), Async State
        Machine "Type Name" (no matches), "Top Types" lists, handler-method names.
      - **Pre-rendered HTML (large reports) skips the pass,** same as the string pool.
-4. **Thread retention observations** *(pending)* — first check whether requesting the thread-retention value from `ThreadAnalyzer` makes the tool do extra work on every run (declare it optional, and confirm Stage B is not newly triggered). — per D3. Needs the analyzer change; check that it
-   stays a raw measure and does not add new judgment.
+4. **Thread retention observations** *(done 2026-10-07, verified on the reference dump; uncommitted)* — per D3.
+   - **Extra-work check (answered):** the dominator-tree build runs only when an active analyzer carries the
+     `IRequiresDominatorTreeIndex` marker (`DiskBackedObjectIndexWriter`). `ThreadAnalyzer` does not add it: it declares
+     `[OptionalCapability(heap.dominators)]` and reads `context.HeapDominators`, which `AnalysisContextBuilder` fills from the
+     cache when the tree exists. So this triggers nothing new; Thread Analysis took 16 ms on the real run.
+   - **What it does:** `ThreadAnalyzer` emits one `thread.retained-bytes` observation (`retained.bytes`, `ThreadRef` subject) after each
+     alive thread's `thread.state`, only when `TryGetThreadRetainedSize` returns a value. No tree, or a thread with no stack roots,
+     emits nothing: absent means "not measured", never 0.
+   - **Registered** in `schema/DumpDetective.Schema/observation-type-registry.json` (registry version 1.93.0 → 1.94.0) and in the
+     conformance test's known-types list; both are required by `SdkRegistryConformanceTests`.
+   - **Tests:** 3 new in `ThreadAnalyzerRetypingCharacterizationTests` (value emitted only for threads the tree knows; a thread
+     with no stack roots emits none; no dominator tree emits none). Suite green: 1684 passed, 66 skipped.
+   - **Real dump (1m21s):** observations 97,408 → 97,417 (+9, all `thread.retained-bytes`). 38 alive threads, 9 with stack roots,
+     and all 9 got a value; none with roots was missing one. Largest: thread 24088 retains 22.7 MB, 2392 retains 10.1 MB, 11768 retains
+     2.2 MB. Entities unchanged (14,588). Results: `m2-step1/step4-results.txt`.
+   - **Not shown anywhere yet:** nothing in the report reads these observations until the thread dossier (step 7).
 5. **Type dossier** *(pending)* — Appendix B panels that today's observations can fill: identity,
    population, generations, retention, lifecycle, claims, coverage. Panels without data are listed as
    absent, not hidden.

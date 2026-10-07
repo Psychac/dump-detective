@@ -198,6 +198,100 @@ public sealed class EntitySummaryTests : IDisposable
         emptyJson.RootElement.TryGetProperty("entitySummary", out _).Should().BeFalse();
     }
 
+    [Fact]
+    public void Build_ClaimCitingAnObservation_IsLinkedToEveryEntityThatObservationNames()
+    {
+        TypeRef column = Type("System.Data.DataColumn");
+        TypeRef row = Type("System.Data.DataRow");
+        Observation cited = Fact("leak.candidate-type", "X", [column, row], ("instance.count", 5, MeasureUnit.Count));
+        Observation uncited = Fact("leak.candidate-type", "X", [Type("Other")], ("instance.count", 1, MeasureUnit.Count));
+        FindingRecord claim = Claim("claim-b", derivedFrom: [cited.Id]);
+        FindingRecord otherClaim = Claim("claim-a", derivedFrom: [cited.Id]);
+        IReadOnlyList<EntityRecord> entities = EntityTableBuilder.Build([cited, uncited], []);
+
+        EntitySummary summary = EntitySummaryBuilder.Build([cited, uncited], entities, [claim, otherClaim]);
+
+        summary.ClaimIds.Should().Equal("claim-a", "claim-b");
+        EntityFacts DataColumn() => summary.Entities.Single(e => e.EntityId == entities.Single(x => x.JoinKey == "System.Data.DataColumn").Id);
+        EntityFacts Other() => summary.Entities.Single(e => e.EntityId == entities.Single(x => x.JoinKey == "Other").Id);
+        DataColumn().ClaimIndexes.Should().Equal(0, 1);
+        Other().ClaimIndexes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Build_ClaimNamingASubjectDirectly_IsLinkedEvenWithoutAnObservation()
+    {
+        ModuleRef module = new() { SimpleName = "only-in-claim.dll", Fidelity = MatchFidelity.Exact };
+        FindingRecord claim = Claim("claim-1", derivedFrom: null) with
+        {
+            Assertion = new DumpDetective.Sdk.Synthesis.Assertion { Predicate = DumpDetective.Sdk.Synthesis.AssertionPredicate.Exhibits, Subject = module },
+        };
+        IReadOnlyList<EntityRecord> entities = EntityTableBuilder.Build([], [claim]);
+
+        EntitySummary summary = EntitySummaryBuilder.Build([], entities, [claim]);
+
+        EntityFacts row = summary.Entities.Should().ContainSingle().Which;
+        row.Groups.Should().BeEmpty();
+        row.ClaimIndexes.Should().Equal(0);
+        summary.ClaimIds.Should().Equal("claim-1");
+    }
+
+    [Fact]
+    public void Build_ClaimThatReachesNoEntity_IsNotListed_AndLinkedClaimsKeepTheirOrder()
+    {
+        TypeRef a = Type("A");
+        Observation named = Fact("leak.candidate-type", "X", [a], ("instance.count", 1, MeasureUnit.Count));
+        Observation processWide = Fact("heap.memory-composition", "X", [], ("total.bytes", 5, MeasureUnit.Bytes));
+        IReadOnlyList<EntityRecord> entities = EntityTableBuilder.Build([named, processWide], []);
+
+        EntitySummary summary = EntitySummaryBuilder.Build(
+            [named, processWide], entities, [Claim("c1", [named.Id]), Claim("c2", [processWide.Id]), Claim("c3", [named.Id])]);
+
+        summary.ClaimIds.Should().Equal("c1", "c3");
+        summary.Entities.Single().ClaimIndexes.Should().Equal(0, 1);
+    }
+
+    [Fact]
+    public void Build_ClaimsInAnyOrder_ProduceIdenticalJson()
+    {
+        TypeRef a = Type("A");
+        Observation first = Fact("leak.candidate-type", "X", [a], ("instance.count", 1, MeasureUnit.Count));
+        Observation second = Fact("type.boxing", "Y", [a], ("instance.count", 2, MeasureUnit.Count));
+        FindingRecord one = Claim("c1", derivedFrom: [first.Id]);
+        FindingRecord two = Claim("c2", derivedFrom: [second.Id]);
+        IReadOnlyList<EntityRecord> entities = EntityTableBuilder.Build([first, second], []);
+
+        string forward = SerializeSummary(EntitySummaryBuilder.Build([first, second], entities, [one, two]));
+        string reversed = SerializeSummary(EntitySummaryBuilder.Build([second, first], entities, [two, one]));
+
+        reversed.Should().Be(forward);
+    }
+
+    [Fact]
+    public void EntityFacts_WithClaims_AreWrittenWithAThirdElement()
+    {
+        TypeRef a = Type("A");
+        Observation fact = Fact("leak.candidate-type", "X", [a], ("instance.count", 5, MeasureUnit.Count));
+        IReadOnlyList<EntityRecord> entities = EntityTableBuilder.Build([fact], []);
+
+        using JsonDocument parsed = JsonDocument.Parse(SerializeSummary(EntitySummaryBuilder.Build([fact], entities, [Claim("c1", [fact.Id])])));
+
+        JsonElement entity = parsed.RootElement.GetProperty("entities")[0];
+        entity.GetArrayLength().Should().Be(3);
+        entity[2].EnumerateArray().Select(v => v.GetInt32()).Should().Equal(0);
+        parsed.RootElement.GetProperty("claimIds")[0].GetString().Should().Be("c1");
+    }
+
+    private static string SerializeSummary(EntitySummary summary)
+    {
+        string reportJson = new JsonCanonicalReportFormatter().Render(new SingleDumpReportDocument { DumpPath = "x", EntitySummary = summary });
+        using JsonDocument parsed = JsonDocument.Parse(reportJson);
+        return parsed.RootElement.GetProperty("entitySummary").GetRawText();
+    }
+
+    private static FindingRecord Claim(string id, ObservationId[]? derivedFrom) =>
+        new(id, "Stub Analyzer", "Leak", "Warning", "title", ["evidence"], "rec", []) { DerivedFrom = derivedFrom };
+
     private static string Serialize(Observation[] observations)
     {
         IReadOnlyList<EntityRecord> entities = EntityTableBuilder.Build(observations, []);

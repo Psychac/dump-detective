@@ -197,7 +197,7 @@ sequencing, what exists today, and decisions before starting.
      and all 9 got a value; none with roots was missing one. Largest: thread 24088 retains 22.7 MB, 2392 retains 10.1 MB, 11768 retains
      2.2 MB. Entities unchanged (14,588). Results: `m2-step1/step4-results.txt`.
    - **Not shown anywhere yet:** nothing in the report reads these observations until the thread dossier (step 7).
-5. **Type dossier** *(5a data done 2026-10-07, uncommitted; 5b page pending)* — panels filled from the facts that name a type. Catalog of the 45
+5. **Type dossier** *(5a data done and committed `e6661e52`; 5b-1 claim links built, uncommitted; 5b-2 page pending)* — panels filled from the facts that name a type. Catalog of the 45
    fact kinds that name a type on the reference dump: `m2-step1/type-observation-catalog.txt`.
    - **Same number from several analyzers (decided: folded).** Instance count comes from ~15 fact kinds and shallow bytes from ~17.
      The page does not merge them or pick a winner (that would be judgment, which the entity layer does not make). It shows one row per
@@ -234,7 +234,30 @@ sequencing, what exists today, and decisions before starting.
        `m2-step1/verify-summary.py`, `verify-summary-results.txt`. Panels: Size 10, Generations 8, Retention 8, Lifecycle 7, Shape 7,
        Exceptions 5, State 3, Other 6.
      - **Not yet read by anything:** the type page (5b) is the first consumer.
-   - **5b — the page (pending):** design the panel layout, the click-through from entity cells, and the heavy-entity display.
+   - **5b — the page (design decided 2026-10-07):**
+     - **Where:** a slide-over panel from the right, so the reader keeps their place in the report; Esc or a close button dismisses it.
+       (Rejected: reusing the narrow right rail, which already holds the action queue; and a full new section, which loses the reader's place.)
+     - **Click and URL:** a type name in an entity column becomes a link-styled cell; clicking opens the panel and sets the URL to
+       `#entity/type/<name>`. Opening that URL directly opens the panel. A name with no entity shows a "not found" panel, never a silent miss.
+       Closing restores the previous URL. The existing hash handlers treat any hash as an element id; the entity form must not trip them.
+     - **Cells keep their id:** today `resolveEntityCell` turns an id into a name before the cell is drawn, so the id is lost. The cell
+       must keep it (`data-entity-id`) and one delegated click handler on the main area reads it.
+     - **Claims panel:** claim cards already have an anchor built in the browser from the claim id (`finding-<slug>`), and the HTML keeps
+       every claim id (82 of 82 unique), so each claim in the panel links to its card.
+     - **5b-1 — claim links in the summary (built 2026-10-07):** `entitySummary.claimIds` plus a third element on an entity's row
+       (`[id,[groups],[claimIndex,...]]`, only when a claim cites it). Linked by the observations a claim cites (`derivedFrom`) and by a
+       claim's assertion subject. Only claims that reach an entity are listed, ids sorted for determinism.
+       - **Found on the real dump:** the full finding list has 83 claims but the report shows 82. `gc root analysis::subgraph-walk-capped`
+         is in the list but in neither the cross-domain nor any domain insights, and it cites only process-wide numbers, so it linked to
+         nothing and was occupying an id; now dropped. Why it is not shown anywhere was not investigated.
+       - **Tests:** 5 new in `EntitySummaryTests` (cited observation links every entity it names; direct subject links without an
+         observation; order independence; unlinked claim not listed; wire shape). Suite green apart from the known flaky Array test.
+       - **Real dump (1m19s):** 40 of 82 claims link to entities (matches step 1's count); 2,218 entities have claims. Recomputed
+         independently from the side-car and claim lineage: **0 mismatched entities**, id list identical; every id exists in the HTML. For
+         `DataColumn`: LOH array pressure, high Gen2 finalizable count, finalizer queue retaining ~578.6 MB, DataTable lifecycle pattern,
+         leak candidate cluster. Size: `report.json` 84.59 → 84.61 MB, HTML 3.103 → 3.108 MB. Results: `m2-step1/verify-claims-results.txt`.
+     - **5b-2 — the panel (pending):** panel layout, click handler, URL handling, heavy-entity display (counts and totals per fact kind, raw rows stay
+       in the side-car).
    - **An unmapped fact kind goes under an "Other" panel with its name,** so a new analyzer cannot make facts disappear.
    - **Summary design (decided 2026-10-07):** built at write time from the observations, next to `EntityTableBuilder`,
      attached to the document beside `Entities`, in both `report.json` and the HTML. Estimated 0.16-0.21 MB in the HTML (measured above).

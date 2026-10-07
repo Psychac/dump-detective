@@ -42,7 +42,7 @@ internal sealed class ReportOutputWriter(IEnumerable<IReportSink> sinks)
                     {
                         Observations = sideCar,
                         Entities = entities,
-                        EntitySummary = entities is null ? null : EntitySummaryBuilder.Build(observations, entities),
+                        EntitySummary = entities is null ? null : EntitySummaryBuilder.Build(observations, entities, document.Findings),
                     };
                 }
 

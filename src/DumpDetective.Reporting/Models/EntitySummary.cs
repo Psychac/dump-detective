@@ -13,15 +13,19 @@ namespace DumpDetective.Reporting.Models;
 internal sealed record EntitySummary(
     IReadOnlyList<FactKindRecord> FactKinds,
     IReadOnlyList<MeasureRecord> Measures,
-    IReadOnlyList<EntityFacts> Entities);
+    IReadOnlyList<EntityFacts> Entities,
+    IReadOnlyList<string> ClaimIds);
 
 internal sealed record FactKindRecord(string Name, string Analyzer, string Panel);
 
 internal sealed record MeasureRecord(string Name, string Unit);
 
-/// <summary>Written as <c>[entityId, [[factKind, count, [[measure, sum, min, max], ...]], ...]]</c>.</summary>
+/// <summary>
+/// Written as <c>[entityId, [[factKind, count, [[measure, sum, min, max], ...]], ...]]</c>, with a third element
+/// <c>[claimIndex, ...]</c> (indexes into <see cref="EntitySummary.ClaimIds"/>) only when a claim cites the entity.
+/// </summary>
 [JsonConverter(typeof(EntityFactsJsonConverter))]
-internal sealed record EntityFacts(int EntityId, IReadOnlyList<FactGroup> Groups);
+internal sealed record EntityFacts(int EntityId, IReadOnlyList<FactGroup> Groups, IReadOnlyList<int> ClaimIndexes);
 
 internal sealed record FactGroup(int FactKind, int Count, IReadOnlyList<MeasureStat> Stats);
 
@@ -62,7 +66,11 @@ internal sealed class EntityFactsJsonConverter : JsonConverter<EntityFacts>
             json.Append("]]");
         }
 
-        json.Append("]]");
+        json.Append(']');
+        if (value.ClaimIndexes.Count > 0)
+            json.Append(",[").AppendJoin(',', value.ClaimIndexes).Append(']');
+
+        json.Append(']');
         writer.WriteRawValue(json.ToString(), skipInputValidation: true);
     }
 

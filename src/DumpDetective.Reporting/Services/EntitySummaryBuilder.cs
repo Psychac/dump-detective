@@ -6,12 +6,15 @@ namespace DumpDetective.Reporting.Services;
 
 internal static class EntitySummaryBuilder
 {
-    public static EntitySummary Build(IReadOnlyList<Observation> observations, IReadOnlyList<EntityRecord> entities)
+    public static EntitySummary Build(
+        IReadOnlyList<Observation> observations, IReadOnlyList<EntityRecord> entities, IReadOnlyList<FindingRecord>? claims = null)
     {
         var entityIdByKey = new Dictionary<(EntityKind Kind, string JoinKey), int>(entities.Count);
         for (int i = 0; i < entities.Count; i++)
             entityIdByKey[(entities[i].Kind, entities[i].JoinKey)] = entities[i].Id;
 
+        (List<string> claimIds, Dictionary<ObservationId, List<int>> claimIndexesByObservation) = IndexCitingClaims(claims);
+        var claimIndexesByEntity = new Dictionary<int, SortedSet<int>>();
         var accumulatorsByEntity = new Dictionary<int, Dictionary<string, FactAccumulator>>();
         var analyzerByFactKind = new Dictionary<string, string>(StringComparer.Ordinal);
         var measureKeys = new HashSet<(string Name, string Unit)>();
@@ -28,6 +31,9 @@ internal static class EntitySummaryBuilder
                 if (!entityIdByKey.TryGetValue((subjects[s].Kind, subjects[s].JoinKey), out int entityId))
                     continue;
 
+                if (claimIndexesByObservation.TryGetValue(observation.Id, out List<int>? citingClaims))
+                    AddClaims(claimIndexesByEntity, entityId, citingClaims);
+
                 if (!accumulatorsByEntity.TryGetValue(entityId, out Dictionary<string, FactAccumulator>? byFactKind))
                     accumulatorsByEntity[entityId] = byFactKind = new Dictionary<string, FactAccumulator>(StringComparer.Ordinal);
                 if (!byFactKind.TryGetValue(factKind, out FactAccumulator? accumulator))
@@ -37,7 +43,98 @@ internal static class EntitySummaryBuilder
             }
         }
 
-        return Index(accumulatorsByEntity, analyzerByFactKind, measureKeys);
+        AddClaimsBySubject(claims, claimIds, entityIdByKey, claimIndexesByEntity);
+        List<string> linkedClaimIds = KeepLinkedClaims(claimIds, claimIndexesByEntity);
+        return Index(accumulatorsByEntity, analyzerByFactKind, measureKeys, linkedClaimIds, claimIndexesByEntity);
+    }
+
+    // A claim that cites only process-wide numbers reaches no entity; listing its id would cost bytes and imply a link
+    // that is not there. Ids were assigned in sorted order, so dropping the unlinked ones keeps the order.
+    private static List<string> KeepLinkedClaims(List<string> claimIds, Dictionary<int, SortedSet<int>> claimIndexesByEntity)
+    {
+        var linked = new SortedSet<int>();
+        foreach (SortedSet<int> indexes in claimIndexesByEntity.Values)
+            linked.UnionWith(indexes);
+
+        var newIndexByOldIndex = new Dictionary<int, int>(linked.Count);
+        var linkedClaimIds = new List<string>(linked.Count);
+        foreach (int oldIndex in linked)
+        {
+            newIndexByOldIndex[oldIndex] = linkedClaimIds.Count;
+            linkedClaimIds.Add(claimIds[oldIndex]);
+        }
+
+        foreach (int entityId in new List<int>(claimIndexesByEntity.Keys))
+        {
+            var remapped = new SortedSet<int>();
+            foreach (int oldIndex in claimIndexesByEntity[entityId])
+                remapped.Add(newIndexByOldIndex[oldIndex]);
+            claimIndexesByEntity[entityId] = remapped;
+        }
+
+        return linkedClaimIds;
+    }
+
+    // Only claims that cite observations (or name a subject) get an index; ids are sorted so identical input gives
+    // identical output however the findings happened to be ordered.
+    private static (List<string> ClaimIds, Dictionary<ObservationId, List<int>> ClaimIndexesByObservation) IndexCitingClaims(
+        IReadOnlyList<FindingRecord>? claims)
+    {
+        var claimIds = new List<string>();
+        var claimIndexesByObservation = new Dictionary<ObservationId, List<int>>();
+        if (claims is null)
+            return (claimIds, claimIndexesByObservation);
+
+        var citing = new List<FindingRecord>();
+        foreach (FindingRecord claim in claims)
+        {
+            if (claim.DerivedFrom is { Count: > 0 } || claim.Assertion?.Subject is not null)
+                citing.Add(claim);
+        }
+
+        citing.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
+        for (int claimIndex = 0; claimIndex < citing.Count; claimIndex++)
+        {
+            claimIds.Add(citing[claimIndex].Id);
+            if (citing[claimIndex].DerivedFrom is not { } derivedFrom)
+                continue;
+
+            foreach (ObservationId observationId in derivedFrom)
+            {
+                if (!claimIndexesByObservation.TryGetValue(observationId, out List<int>? indexes))
+                    claimIndexesByObservation[observationId] = indexes = new List<int>(1);
+                if (!indexes.Contains(claimIndex))
+                    indexes.Add(claimIndex);
+            }
+        }
+
+        return (claimIds, claimIndexesByObservation);
+    }
+
+    private static void AddClaims(Dictionary<int, SortedSet<int>> claimIndexesByEntity, int entityId, List<int> claimIndexes)
+    {
+        if (!claimIndexesByEntity.TryGetValue(entityId, out SortedSet<int>? known))
+            claimIndexesByEntity[entityId] = known = new SortedSet<int>();
+        foreach (int claimIndex in claimIndexes)
+            known.Add(claimIndex);
+    }
+
+    // A claim can name an entity directly through its assertion subject without citing any observation about it.
+    private static void AddClaimsBySubject(
+        IReadOnlyList<FindingRecord>? claims, List<string> claimIds,
+        Dictionary<(EntityKind Kind, string JoinKey), int> entityIdByKey, Dictionary<int, SortedSet<int>> claimIndexesByEntity)
+    {
+        if (claims is null)
+            return;
+
+        foreach (FindingRecord claim in claims)
+        {
+            if (claim.Assertion?.Subject is not { } subject
+                || !entityIdByKey.TryGetValue((subject.Kind, subject.JoinKey), out int entityId))
+                continue;
+
+            AddClaims(claimIndexesByEntity, entityId, [claimIds.IndexOf(claim.Id)]);
+        }
     }
 
     // The same kind is always emitted by one analyzer; if that ever stops being true, the lowest name wins so the choice
@@ -51,7 +148,9 @@ internal static class EntitySummaryBuilder
     private static EntitySummary Index(
         Dictionary<int, Dictionary<string, FactAccumulator>> accumulatorsByEntity,
         Dictionary<string, string> analyzerByFactKind,
-        HashSet<(string Name, string Unit)> measureKeys)
+        HashSet<(string Name, string Unit)> measureKeys,
+        List<string> claimIds,
+        Dictionary<int, SortedSet<int>> claimIndexesByEntity)
     {
         var usedFactKinds = new HashSet<string>(StringComparer.Ordinal);
         foreach (Dictionary<string, FactAccumulator> byFactKind in accumulatorsByEntity.Values)
@@ -84,20 +183,24 @@ internal static class EntitySummaryBuilder
             measures.Add(new MeasureRecord(measureList[i].Name, measureList[i].Unit));
         }
 
-        var entityIds = new List<int>(accumulatorsByEntity.Keys);
-        entityIds.Sort();
-        var entities = new List<EntityFacts>(entityIds.Count);
-        foreach (int entityId in entityIds)
+        var entityIdSet = new SortedSet<int>(accumulatorsByEntity.Keys);
+        entityIdSet.UnionWith(claimIndexesByEntity.Keys);
+        var entities = new List<EntityFacts>(entityIdSet.Count);
+        foreach (int entityId in entityIdSet)
         {
-            Dictionary<string, FactAccumulator> byFactKind = accumulatorsByEntity[entityId];
-            var groups = new List<FactGroup>(byFactKind.Count);
-            foreach (KeyValuePair<string, FactAccumulator> pair in byFactKind)
-                groups.Add(pair.Value.ToGroup(factKindIndex[pair.Key], measureIndex));
-            groups.Sort(static (a, b) => a.FactKind.CompareTo(b.FactKind));
-            entities.Add(new EntityFacts(entityId, groups));
+            var groups = new List<FactGroup>();
+            if (accumulatorsByEntity.TryGetValue(entityId, out Dictionary<string, FactAccumulator>? byFactKind))
+            {
+                foreach (KeyValuePair<string, FactAccumulator> pair in byFactKind)
+                    groups.Add(pair.Value.ToGroup(factKindIndex[pair.Key], measureIndex));
+                groups.Sort(static (a, b) => a.FactKind.CompareTo(b.FactKind));
+            }
+
+            int[] claimIndexes = claimIndexesByEntity.TryGetValue(entityId, out SortedSet<int>? entityClaims) ? [.. entityClaims] : [];
+            entities.Add(new EntityFacts(entityId, groups, claimIndexes));
         }
 
-        return new EntitySummary(factKinds, measures, entities);
+        return new EntitySummary(factKinds, measures, entities, claimIds);
     }
 
     private sealed class FactAccumulator

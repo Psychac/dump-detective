@@ -36,7 +36,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         {
             compactTables.Add(STCompact(
                 "Top array types by total bytes",
-                new[] { CH("Element Type"), CH("Module"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim"), CH("Avg Instance Size","bytes"), CH("% Heap","number","percent"), CH("% Gen2+LOH","number","percent") },
+                new[] { CHType("Element Type"), CH("Module"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim"), CH("Avg Instance Size","bytes"), CH("% Heap","number","percent"), CH("% Gen2+LOH","number","percent") },
                 BuildTypeRows(d.TopArrayTypesBySize).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -46,7 +46,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                           "LOH allocations are never compacted and contribute to heap fragmentation."));
             compactTables.Add(STCompact(
                 "Largest individual array instances",
-                new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Rank","number"), CH("Size","bytes"), CH("Label") },
+                new[] { CH("Address"), CHType("Element Type"), CH("Length","number"), CH("Rank","number"), CH("Size","bytes"), CH("Label") },
                 BuildLargeRows(d.TopLargeArrays).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -56,7 +56,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                           "These waste heap memory and could be replaced with sparse data structures such as Dictionary<int, T>."));
             compactTables.Add(STCompact(
                 "Sparse arrays by estimated wasted bytes",
-                new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Null/Default %", "number", "percent"), CH("Wasted Bytes","bytes") },
+                new[] { CH("Address"), CHType("Element Type"), CH("Length","number"), CH("Null/Default %", "number", "percent"), CH("Wasted Bytes","bytes") },
                 BuildSparseRows(d.TopSparseArrays).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -67,7 +67,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                           "objects, which blocks compaction and fragments the surrounding heap segment."));
             compactTables.Add(STCompact(
                 "Pinned array instances",
-                new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Rank","number"), CH("Size","bytes"), CH("Label") },
+                new[] { CH("Address"), CHType("Element Type"), CH("Length","number"), CH("Rank","number"), CH("Size","bytes"), CH("Label") },
                 BuildLargeRows(topPinnedArrays).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

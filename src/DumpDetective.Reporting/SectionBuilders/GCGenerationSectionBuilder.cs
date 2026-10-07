@@ -76,7 +76,7 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
                         Cell(p.LohCount.ToString("N0"),  p.LohCount),
                         Cell(p.TotalBytes > 0 ? FormatBytes(p.TotalBytes) : "—")));
                 }
-                compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH Count","number"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                compactTables.Add(STCompact("Top LOH types", new[] { CHType("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH Count","number"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
         else if (d.TopLohTypes.Count > 0)
@@ -90,7 +90,7 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
                     Cell(t.LohBytes > 0 ? FormatBytes(t.LohBytes) : "—")));
             }
-            compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top LOH types", new[] { CHType("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.PerTypeGenerationProfiles is { Count: > 0 })

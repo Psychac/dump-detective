@@ -95,7 +95,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             var rows = new List<TableRow>(d.TopDuplicateTypes.Count);
             foreach (var t in d.TopDuplicateTypes)
                 rows.Add(Row(Cell(t.Name), Cell($"{t.Count:N0}", t.Count)));
-            compactTables.Add(STCompact("Types by duplicate occurrence", new[] { CH("Type"), CH("Duplicate Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Types by duplicate occurrence", new[] { CHType("Type"), CH("Duplicate Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // P1-3: Top types owning string fields
@@ -107,7 +107,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                 double pct = d.TotalStringMemoryBytes > 0 ? totalBytes * 100.0 / d.TotalStringMemoryBytes : 0.0;
                 rows.Add(Row(Cell(typeName), Cell(FormatHelper.FormatBytes(totalBytes), (long)totalBytes), Cell($"{pct:F1}%", null)));
             }
-            compactTables.Add(STCompact("Types by string field ownership", new[] { CH("Type"), CH("Total String Bytes","bytes"), CH("% of string memory", "number", "percent") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Types by string field ownership", new[] { CHType("Type"), CH("Total String Bytes","bytes"), CH("% of string memory", "number", "percent") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopDuplicates.Count > 0)
@@ -135,7 +135,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(sampling),
                     Cell(examples)));
             }
-            compactTables.Add(STCompact("Top duplicate strings", new[] { CH("Fingerprint"), CH("Preview"), CH("Count","number"), CH("Avg Size","bytes"), CH("Total Size","bytes"), CH("Wasted","bytes"), CH("% of strings", "number", "percent"), CH("Dominant Type"), CH("Sampling"), CH("Examples") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top duplicate strings", new[] { CH("Fingerprint"), CH("Preview"), CH("Count","number"), CH("Avg Size","bytes"), CH("Total Size","bytes"), CH("Wasted","bytes"), CH("% of strings", "number", "percent"), CHType("Dominant Type"), CH("Sampling"), CH("Examples") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // P3-1: group duplicate patterns that share a common prefix (e.g. templated/formatted
@@ -191,7 +191,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(previewDisplay),
                     Cell(s.TypeName ?? "(unknown)")));
             }
-            compactTables.Add(STCompact("Strings exceeding LOH threshold", new[] { CH("Address"), CH("Char Length","number"), CH("Size","bytes"), CH("Preview"), CH("Type") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Strings exceeding LOH threshold", new[] { CH("Address"), CH("Char Length","number"), CH("Size","bytes"), CH("Preview"), CHType("Type") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(

@@ -54,7 +54,7 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
             var typeRows = new List<TableRow>(d.TopActiveFrameTypes.Count);
             foreach (NameCountEntry e in d.TopActiveFrameTypes)
                 typeRows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
-            compactTables.Add(STCompact("Active frame types (stack hotspots)", new[] { CH("Type"), CH("Stack Hits","number") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Active frame types (stack hotspots)", new[] { CHType("Type"), CH("Stack Hits","number") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopActiveModulesByFrameHits.Count > 0)

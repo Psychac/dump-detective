@@ -62,7 +62,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{e.Gen2Fraction:P0}",                    e.Gen2Fraction),
                     Cell(e.HasIEquatable ? "Yes" : "No")]));
             }
-            compactTables.Add(STCompact("Top boxed types by total size", new[] { CH("Value Type"), CH("Box Count","number"), CH("Total Box Bytes","bytes"), CH("IsEnum"), CH("Gen2 %","number","percent"), CH("IEquatable<T>") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top boxed types by total size", new[] { CHType("Value Type"), CH("Box Count","number"), CH("Total Box Bytes","bytes"), CH("IsEnum"), CH("Gen2 %","number","percent"), CH("IEquatable<T>") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopOversizedTypes.Count > 0)
@@ -76,7 +76,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{e.Count:N0}",      e.Count)]));
             }
             compactTables.Add(STCompact("Oversized value types",
-                new[] { CH("Type"), CH("StaticSize"), CH("Instance Count","number") }, oversizedRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                new[] { CHType("Type"), CH("StaticSize"), CH("Instance Count","number") }, oversizedRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopPaddingWasteTypes.Count > 0)
@@ -92,7 +92,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{e.WasteRatio:P0}")]));
             }
             compactTables.Add(STCompact("Struct types with highest padding waste",
-                new[] { CH("Type"), CH("Size"), CH("Field Bytes"), CH("Wasted","bytes"), CH("Waste %", "number", "percent") }, padRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                new[] { CHType("Type"), CH("Size"), CH("Field Bytes"), CH("Wasted","bytes"), CH("Waste %", "number", "percent") }, padRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
         else
         {

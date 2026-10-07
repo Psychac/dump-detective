@@ -65,7 +65,7 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell($"{t.InvalidStateCount:N0}", t.InvalidStateCount),
                 ]));
             }
-            compactTables.Add(STCompact("Channel objects by type", new[] { CH("Type"), CH("Total","number"), CH("Opening","number"), CH("Opened","number"), CH("Faulted","number"), CH("Closing","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes"), CH("Binding"), CH("Invalid State","number") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Channel objects by type", new[] { CHType("Type"), CH("Total","number"), CH("Opening","number"), CH("Opened","number"), CH("Faulted","number"), CH("Closing","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes"), CH("Binding"), CH("Invalid State","number") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Top faulted channels
@@ -84,7 +84,7 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(remoteAddr),
                 ]));
             }
-            compactTables.Add(STCompact("Faulted channel instances", new[] { CH("Type"), CH("Address"), CH("State"), CH("Remote Endpoint") }, faultRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Faulted channel instances", new[] { CHType("Type"), CH("Address"), CH("State"), CH("Remote Endpoint") }, faultRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks,

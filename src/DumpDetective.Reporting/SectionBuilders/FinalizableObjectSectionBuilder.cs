@@ -44,7 +44,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         {
             compactTables.Add(STCompact(
                 "Top finalizable types by Gen2 object count",
-                new[] { CH("Type Name"), CH("Gen 0","number"), CH("Gen 1","number"), CH("Gen 2","number"), CH("LOH","number"), CH("Total Bytes","bytes"), CH("Finalizable") },
+                new[] { CHType("Type Name"), CH("Gen 0","number"), CH("Gen 1","number"), CH("Gen 2","number"), CH("LOH","number"), CH("Total Bytes","bytes"), CH("Finalizable") },
                 BuildTypeRows(d.TopFinalizableTypesByGen2Count).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -52,7 +52,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         {
             compactTables.Add(STCompact(
                 "Top types in finalizer queue by object count",
-                new[] { CH("Type Name"), CH("Queue Count","number") },
+                new[] { CHType("Type Name"), CH("Queue Count","number") },
                 BuildQueueTypeRows(d.TopQueueTypesByCount).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -60,7 +60,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         {
             compactTables.Add(STCompact(
                 "CriticalFinalizerObject / SafeHandle accumulation by type",
-                new[] { CH("Type Name"), CH("Queue Count","number") },
+                new[] { CHType("Type Name"), CH("Queue Count","number") },
                 BuildQueueTypeRows(d.TopCriticalFinalizerTypesByCount).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

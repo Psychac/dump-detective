@@ -75,7 +75,7 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             var rows = new List<TableRow>(d.TopWeakTargetTypes.Count);
             foreach (NameCountEntry e in d.TopWeakTargetTypes)
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
-            compactTables.Add(STCompact("Top alive weak target types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top alive weak target types", new[] { CHType("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopStaleWrapperHolderTypes.Count > 0)
@@ -83,7 +83,7 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             var rows = new List<TableRow>(d.TopStaleWrapperHolderTypes.Count);
             foreach (NameCountEntry e in d.TopStaleWrapperHolderTypes)
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
-            compactTables.Add(STCompact("Top stale wrapper holder types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top stale wrapper holder types", new[] { CHType("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (!d.StaleWrapperCountIsExact && d.StaleWrapperCount > 0)
@@ -121,7 +121,7 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
                 var rows = new List<TableRow>(heldOnlyTypes.Count);
                 foreach (NameCountEntry e in heldOnlyTypes)
                     rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
-                compactTables.Add(STCompact("Held only via weak reference — top types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                compactTables.Add(STCompact("Held only via weak reference — top types", new[] { CHType("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 

@@ -120,7 +120,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                     Cell(FormatHelper.FormatBytes(type.TotalBytes), (long)type.TotalBytes),
                     Cell($"{pctOfLoh:F1}%", pctOfLoh)]));
             }
-            compactTables.Add(STCompact("LOH consumption by type", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("% of LOH", "number", "percent") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("LOH consumption by type", new[] { CHType("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("% of LOH", "number", "percent") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var largeObjects = d.TopLargeObjects ?? [];
@@ -135,7 +135,7 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                     Cell(FormatHelper.FormatBytes(lo.Size), (long)lo.Size),
                     Cell($"0x{lo.Address:x16}")]));
             }
-            compactTables.Add(STCompact("Top large objects by size", new[] { CH("Type"), CH("Size","bytes"), CH("Address") }, loRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top large objects by size", new[] { CHType("Type"), CH("Size","bytes"), CH("Address") }, loRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(

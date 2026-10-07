@@ -159,8 +159,20 @@ sequencing, what exists today, and decisions before starting.
        these names, and few of them need an `[id, name]` pair).
      - **Not changed on purpose:** Event Leak "Subscriber Type" (names are truncated to 100 characters, so some will not
        match an entity), Object Shape "Value Type" (a Yes/No column, not a type).
-   - **Still to do:** the remaining type columns (see `m2-step1/column-match-results.txt`), in batches. Pre-rendered
-     HTML (large reports) skips the pass, same as the string pool.
+   - **Batch 2 committed** as `e2684999`; batch 1 as `26e91be1`.
+   - **Batch 3 (built 2026-10-07, uncommitted):** String (3 tables incl. "Dominant Type"), Array (4), Boxing (3, incl. "Value Type"
+     in the boxed-types table, which does hold type names), Finalizable (3 remaining), JIT, LOH & POH (2), WCF (2), GC Handle (8),
+     Weak Reference (3), GC Generation (2), Type System (3). 13 builder files. Suite green (1681 passed, 66 skipped).
+     - **Real dump (1m14s):** 43 entity columns, 158,534 cells (4,583 `[id, name]`, 1,939 literals); this batch added 30 columns and
+       17,672 cells. **0 mismatches** against the original names in `report.json` and the HTML payload
+       (`m2-step1/verify-batch3-results.txt`).
+     - **Size:** `report.json` 82.68 → 82.41 MB; HTML 2.906 → 2.889 MB.
+     - **Why 1,939 literals:** types with no entity (short names such as `SqlCommand`) and truncated names. They stay text.
+   - **Still to do (batch 4):** Dominator, Crash, Async Task, Async State Machine, Module, Event Leak "Subscriber Type", Timer, HTTP,
+     Reference Chain, Hang, Collection "Wasteful collections", DB Connection, SQL "Command/Transaction objects by type", Thread
+     exception types. Left alone, not type columns: Object Shape and TypeTable "Value Type" (Yes/No), SQL "Outstanding commands" and
+     Collection "Collections by GC generation" (short names that match no entity), "Top Types" lists, handler-method names.
+     Pre-rendered HTML (large reports) skips the pass, same as the string pool.
 4. **Thread retention observations** *(pending)* — first check whether requesting the thread-retention value from `ThreadAnalyzer` makes the tool do extra work on every run (declare it optional, and confirm Stage B is not newly triggered). — per D3. Needs the analyzer change; check that it
    stays a raw measure and does not add new judgment.
 5. **Type dossier** *(pending)* — Appendix B panels that today's observations can fill: identity,

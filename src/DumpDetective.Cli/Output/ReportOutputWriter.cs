@@ -1,6 +1,7 @@
 using DumpDetective.Cli.Console;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Diagnostics;
 using DumpDetective.Sdk.Observations;
@@ -34,7 +35,11 @@ internal sealed class ReportOutputWriter(IEnumerable<IReportSink> sinks)
                 {
                     ObservationsReference sideCar = await ObservationsSideCarWriter.WriteAsync(
                         outPath, observations, compressed: !resolved.Report.ObservationsUncompressed, cancellationToken);
-                    document = document with { Observations = sideCar };
+                    document = document with
+                    {
+                        Observations = sideCar,
+                        Entities = document is SingleDumpReportDocument ? EntityTableBuilder.Build(observations, document.Findings) : null,
+                    };
                 }
 
                 foreach (IReportSink sink in _sinks)

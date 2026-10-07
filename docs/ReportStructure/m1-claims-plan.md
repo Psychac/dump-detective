@@ -316,3 +316,4 @@ Recorded so the M2/M4 plans start from facts, not re-survey:
 - Inference confidence: unpopulated (see step 4). A decision, not a build task.
 - Counter quality: most counters are `Counter.None`; the plan's padding risk applies.
 - Shrinking `KnownFalsifierOverlaps.txt` (24 pairs; see step 3, Guard 1).
+- Claim `relations` (supports / contradicts / retains / subscribes-to): deferred out of M1 and again out of M2; tracked as **M2b** in [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path) and [m2-entities-plan.md](m2-entities-plan.md#deferred-work-do-not-drop).

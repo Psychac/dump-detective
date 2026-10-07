@@ -104,6 +104,12 @@ internal abstract record AnalysisReportDocument
     public ObservationsReference? Observations { get; init; } = null;
 
     /// <summary>
+    /// Every type, thread, module, object and method the observations and claims name, numbered by sort order
+    /// so two runs over the same input produce the same ids. Null when the report carries no observations.
+    /// </summary>
+    public IReadOnlyList<EntityRecord>? Entities { get; init; } = null;
+
+    /// <summary>
     /// Cross-table string pool for compact-table cells (docs/refactor/report-payload-size-reduction-design.md,
     /// F1). Populated only by the HTML renderer (<see cref="DumpDetective.Reporting.Formatters.ReportStringPool"/>); null for other
     /// formats. A string-typed table cell is unambiguous on the wire: a JSON string is a literal value, a
@@ -172,6 +178,9 @@ internal sealed record AnalyzerRunStatusRecord(
     long CacheMisses,
     string? ErrorMessage,
     string? SkipReason = null);
+
+/// <summary>One row of the report's entity table; <paramref name="Id"/> is its index in <see cref="AnalysisReportDocument.Entities"/>.</summary>
+internal sealed record EntityRecord(int Id, DumpDetective.Sdk.Identity.EntityKind Kind, string JoinKey, DumpDetective.Sdk.Identity.MatchFidelity Fidelity);
 
 /// <summary>Points at the observations side-car by file name (relative to this report) and content hash.</summary>
 internal sealed record ObservationsReference(string File, string Sha256, long Count, bool Compressed);

@@ -35,10 +35,14 @@ internal sealed class ReportOutputWriter(IEnumerable<IReportSink> sinks)
                 {
                     ObservationsReference sideCar = await ObservationsSideCarWriter.WriteAsync(
                         outPath, observations, compressed: !resolved.Report.ObservationsUncompressed, cancellationToken);
+                    IReadOnlyList<EntityRecord>? entities = document is SingleDumpReportDocument
+                        ? EntityTableBuilder.Build(observations, document.Findings)
+                        : null;
                     document = document with
                     {
                         Observations = sideCar,
-                        Entities = document is SingleDumpReportDocument ? EntityTableBuilder.Build(observations, document.Findings) : null,
+                        Entities = entities,
+                        EntitySummary = entities is null ? null : EntitySummaryBuilder.Build(observations, entities),
                     };
                 }
 

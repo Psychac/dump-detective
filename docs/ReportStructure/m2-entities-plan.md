@@ -197,9 +197,76 @@ sequencing, what exists today, and decisions before starting.
      and all 9 got a value; none with roots was missing one. Largest: thread 24088 retains 22.7 MB, 2392 retains 10.1 MB, 11768 retains
      2.2 MB. Entities unchanged (14,588). Results: `m2-step1/step4-results.txt`.
    - **Not shown anywhere yet:** nothing in the report reads these observations until the thread dossier (step 7).
-5. **Type dossier** *(pending)* — Appendix B panels that today's observations can fill: identity,
-   population, generations, retention, lifecycle, claims, coverage. Panels without data are listed as
-   absent, not hidden.
+5. **Type dossier** *(5a data done 2026-10-07, uncommitted; 5b page pending)* — panels filled from the facts that name a type. Catalog of the 45
+   fact kinds that name a type on the reference dump: `m2-step1/type-observation-catalog.txt`.
+   - **Same number from several analyzers (decided: folded).** Instance count comes from ~15 fact kinds and shallow bytes from ~17.
+     The page does not merge them or pick a winner (that would be judgment, which the entity layer does not make). It shows one row per
+     measure and value, naming every analyzer that reported it: `Instances 54,068 (Leak Candidate Analysis, Finalizable Object
+     Analysis)`. When sources differ, the values split into separate rows, so a disagreement stays visible.
+   - **Panels** (assignment is a table keyed by fact kind):
+     - Size and population: leak-candidate, finalizable-population, array-composition, boxing, known-pattern, timer, HTTP, SQL, WCF.
+     - Generations and heaps: generation-type-profile, top-allocator, top-accumulator, LOH composition, large/pinned/sparse arrays, long strings.
+     - Retention: type.retention, retention-hotspot, root-reachability, reference-chain sample, `heap.root`, static and event publisher facts.
+     - Lifecycle: finalizer-queue entries, weak-handle targets, pinned and ref-counted handles, orphaned tasks.
+     - Shape and cost: boxing, struct-padding waste, oversized value, reference-heavy, value-heavy, collection waste.
+     - Exceptions and async: exception-type, active-exception, crash-thread-candidate, async state machine, captured closure.
+     - Fixed parts: Claims (claims that cite its facts), Relations (slot, "not built yet", see M2b), Not measured.
+   - **Heavy types show totals, not rows.** `DataColumn` has 54,005 finalizer-queue facts: the page shows a count and summed measures per
+     fact kind; raw rows stay in the side-car (D2).
+   - **5a — per-entity summary (built and verified 2026-10-07):**
+     - `EntitySummaryBuilder` + `EntityFactPanels` (panel table and the summable-measure allow-list) + `EntitySummary` models in `Reporting`;
+       attached as `AnalysisReportDocument.EntitySummary` in `ReportOutputWriter`, next to `Entities`; single-dump only.
+     - **Judgment calls resolved with the defaults:** event-publisher facts under Retention; pinned handles and orphaned tasks under
+       Lifecycle; leak candidates under Size and population; `infra.sql-connection-pool` left in Other; `runtime.crash-thread-candidate` stays
+       on the type page until step 6. Module facts (JIT frames, footprints, unknown identity, HTTP handler module) are in Other until M2c.
+     - **Summing is an allow-list**, not a deny-list: only reviewed counts and shallow-style byte totals are added across facts of one kind;
+       anything else (retained bytes, averages, ratios, flags, new measures) gets min and max only, so an unreviewed measure can never be
+       summed wrongly.
+     - **Output shape:** `entitySummary: { factKinds, measures, entities }`; each entity is one raw line
+       `[id,[[factKind,count,[[measure,sum|null,min,max]]]]]`. The raw line matters: `report.json` is indented, and indenting nested arrays
+       cost +19 MB on the first real run (82.4 → 101.6 MB); as one line per entity the cost is +2.2 MB.
+     - **Tests:** 10 new in `EntitySummaryTests` (grouping, single fact, allow-list sum, retained bytes never summed, unreviewed measure never
+       summed, unmapped kind to Other, two-subject observation, no-subject observation, order independence, wire shape, `report.json` and
+       embedded HTML). Suite green: 1694 passed, 66 skipped.
+     - **Real dump (1m05s):** 14,588 entities, 17,205 fact groups, 54 fact kinds, 83 measures. Recomputing every group and every one of the
+       144,227 stats independently from the side-car gives **0 mismatches**; the HTML payload carries the same summary as `report.json`.
+       Sizes: `report.json` 82.40 → 84.59 MB, HTML 2.888 → 3.103 MB (+0.21 MB, as estimated). Script and results:
+       `m2-step1/verify-summary.py`, `verify-summary-results.txt`. Panels: Size 10, Generations 8, Retention 8, Lifecycle 7, Shape 7,
+       Exceptions 5, State 3, Other 6.
+     - **Not yet read by anything:** the type page (5b) is the first consumer.
+   - **5b — the page (pending):** design the panel layout, the click-through from entity cells, and the heavy-entity display.
+   - **An unmapped fact kind goes under an "Other" panel with its name,** so a new analyzer cannot make facts disappear.
+   - **Summary design (decided 2026-10-07):** built at write time from the observations, next to `EntityTableBuilder`,
+     attached to the document beside `Entities`, in both `report.json` and the HTML. Estimated 0.16-0.21 MB in the HTML (measured above).
+     - Shape: a document-level list of fact kinds (name, analyzer, panel) and a list of measures (name, unit), then per entity a list of
+       `[factKind, count, [[measure, value, min, max]]]` using indexes into those lists, so names are stored once.
+     - Combining rule per measure, decided at build time: one fact gives its value; several facts of unit Count or Bytes are summed,
+       except `retained.bytes`, ratios, percents and ordinals, which give count, min and max only.
+     - Panel assignment is a table keyed by fact kind (in `Reporting`), with unmapped kinds under "Other". Draft for review, covering all
+       54 fact kinds that name an entity on the reference dump (45 name a type): `m2-step1/panel-mapping-draft.md`. Pending review: six judgment calls
+       listed at its end.
+     - The generation measures (`gen0/gen1/gen2.count`, `gen2.bytes`) are the only ones folded across fact kinds.
+     - Determinism: fact kinds and measures indexed in sorted order, so identical input gives identical output (same rule as D4).
+   - **Per-entity summary in the HTML (option A) measured 2026-10-07, from saved observations, no dump loaded**
+     (`m2-step1/measure-entity-summary.py`, `measure-entity-summary-results.txt`): all 14,588 entities have facts, across 54 fact kinds
+     and 83 measure names. Count plus one value per measure costs **1.28 MB raw, 0.16 MB in the HTML** (gzip+base64); with
+     sum/min/max per measure 2.06 MB raw, 0.21 MB in the HTML. 12,601 entities have exactly one fact. Cheap enough: option A is the plan.
+   - **Two problems the measurement found (to resolve before building):**
+     - **Same measure name, different meaning.** 3,600 (entity, measure) pairs are reported by more than one analyzer and 1,198 of
+       them differ. Example: `System.Byte[]` `retained.bytes` is 24-5,144 from GC Root, 23,064,297 from Dominator, 88 from Reference
+       Chain, because each means retained bytes of a different thing (a root, a tree node, a sample). So folding by measure name alone
+       would put unlike numbers side by side as if comparable. Fold key must include the fact kind or an explicit meaning.
+     - **Sums can be wrong.** Summing `retained.bytes` over many facts double-counts overlapping retained sets (54,005 finalizer-queue
+       entries of `DataColumn`). Sums are valid for counts and shallow bytes only; retained bytes need min/max or a count, not a sum.
+   - **Fold-safety measured 2026-10-07** (`m2-step1/measure-catalog.py`, `fold-safety-results.txt`; supersedes the "folded" wording above):
+     - Even `instance.count` and `shallow.bytes` are not safe to fold by name. Of types reported by more than one fact kind, 556 of 1,524
+       differ on `instance.count` and 629 of 1,430 on `shallow.bytes`: kinds cover different subsets (event-publisher facts count only
+       leaking instances, array-composition only arrays, finalizer-queue entries are one row per object).
+     - Only the generation family agrees: `gen2.count` differs for 1 of 557 types; `gen2.bytes` for 0 of 3; `gen0/gen1.count` come from
+       generation-profile-style facts. `retained.bytes` differs for 23 of 50 types.
+     - **Rule decided 2026-10-07:** group by fact kind, one labelled row per kind with its own measures; no folding across kinds
+       except an allow-list of the generation measures (`gen0.count`, `gen1.count`, `gen2.count`, `gen2.bytes`). Within a kind with many
+       facts: sum counts and shallow bytes, show count + min + max for `retained.bytes`, never a sum.
 6. **Thread facts name their thread** *(pending, before the thread dossier)* — measured in step 1: the
    active-exception and crash-thread-candidate observations point at the exception *type* only, so the
    thread page would miss exceptions. Add the thread as a second subject on those observations

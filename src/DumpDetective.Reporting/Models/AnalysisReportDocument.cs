@@ -109,6 +109,9 @@ internal abstract record AnalysisReportDocument
     /// </summary>
     public IReadOnlyList<EntityRecord>? Entities { get; init; } = null;
 
+    /// <summary>Per-entity facts grouped by the kind of observation that named them; null when <see cref="Entities"/> is null.</summary>
+    public EntitySummary? EntitySummary { get; init; } = null;
+
     /// <summary>
     /// Cross-table string pool for compact-table cells (docs/refactor/report-payload-size-reduction-design.md,
     /// F1). Populated only by the HTML renderer (<see cref="DumpDetective.Reporting.Formatters.ReportStringPool"/>); null for other

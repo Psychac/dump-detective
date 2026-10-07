@@ -53,7 +53,7 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 
         compactTables.Add(STCompact(
             "Top GC roots by severity",
-            new[] { CH("Root Kind"), CH("Root Addr"), CH("Field"), CH("Target Type"), CH("Target Addr"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Exact?") },
+            new[] { CH("Root Kind"), CH("Root Addr"), CH("Field"), CHType("Target Type"), CH("Target Addr"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Exact?") },
             BuildSeverityRows(roots.TopRootsBySeverity).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         var finalizerRoots = roots.TopRootsBySeverity.Where(root => string.Equals(root.RootKind, "FinalizerQueue", StringComparison.Ordinal)).ToArray();
@@ -61,7 +61,7 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         {
             compactTables.Add(STCompact(
                 "Finalizer roots",
-                new[] { CH("Target Type"), CH("Field"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Root Addr") },
+                new[] { CHType("Target Type"), CH("Field"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Root Addr") },
                 finalizerRoots.Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", root.EstimatedRetainedBytes, GCRootSeverityClassifier.ComputeSeverity(root.EstimatedRetainedBytes, root.RootKind), $"0x{root.RootAddress:X}" })).ToArray()));
 
             // P2-1 (docs/analysis/phase1/gcroot-analyzer-audit.md): per-type breakdown of the same
@@ -78,7 +78,7 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 
             compactTables.Add(STCompact(
                 "Finalizer queue by type",
-                new[] { CH("Target Type"), CH("Count", "number"), CH("Total Est. Retained", "bytes") },
+                new[] { CHType("Target Type"), CH("Count", "number"), CH("Total Est. Retained", "bytes") },
                 finalizerByType.Select(t => R(new object?[] { t.TypeName, t.Count, t.TotalRetainedBytes })).ToArray()));
         }
 

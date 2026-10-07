@@ -18,7 +18,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
 
     private static readonly CompactHeader[] ShapeTableHeaders =
     [
-        CH("Type"), CH("Total Fields","number"), CH("Ref Fields","number"), CH("Val Fields","number"),
+        CHType("Type"), CH("Total Fields","number"), CH("Ref Fields","number"), CH("Val Fields","number"),
         CH("Ref Ratio"), CH("Instances","number"), CH("Size (bytes)","number"), CH("GC Scan Cost","number"),
         CH("Gen2 Instances","number"), CH("Gen2 Scan Cost","number"),
         CH("Finalizable"), CH("Value Type"), CH("Array"), CH("Chain Depth","number"), CH("Interfaces","number"), CH("Category"),

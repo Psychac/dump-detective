@@ -76,7 +76,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
                 d.LohSizeBands.Select(b => R(b.RangeLabel, b.ObjectCount.ToString("N0"), FormatBytes(b.TotalBytes))).ToArray()));
         }
 
-        var typeTableHeaders = new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio", "number", "percent"), CH("Total Size", "number"), CH("Profile"), CH("Finalizable") };
+        var typeTableHeaders = new[] { CHType("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen2 Count","number"), CH("Long-lived Ratio", "number", "percent"), CH("Total Size", "number"), CH("Profile"), CH("Finalizable") };
 
         if (d.TopTransientTypes is { Count: > 0 })
         {
@@ -102,7 +102,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         if (d.TopHighGen1SurvivorTypes is { Count: > 0 })
         {
             compactTables.Add(STCompact("Types with high Gen1 survival rate",
-                new[] { CH("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen1 Survival Rate", "number", "percent"), CH("Total Size", "number") },
+                new[] { CHType("Type"), CH("Gen0 Count","number"), CH("Gen1 Count","number"), CH("Gen1 Survival Rate", "number", "percent"), CH("Total Size", "number") },
                 BuildGen1SurvivorRows(d.TopHighGen1SurvivorTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

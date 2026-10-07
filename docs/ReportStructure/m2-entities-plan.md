@@ -149,7 +149,17 @@ sequencing, what exists today, and decisions before starting.
        not by opening the report in a browser. Do this before the next batch.
      - **Pre-existing run-to-run variance, unrelated to this work:** String Analysis "Types by string field ownership"
        and Event Leak "Root Hint" differ between two runs on the same dump.
-   - **Still to do:** the remaining ~20 type columns (see `m2-step1/column-match-results.txt`), in batches. Pre-rendered
+   - **Batch 2 (built 2026-10-07, uncommitted):** Object Shape "Gen2-retained types", Allocation Pattern (4 tables: long-lived,
+     medium-lived, transient, high Gen1 survival), Event Leak "Publisher Type" (3 tables), GC Root "Target Type" (3 headers;
+     one table has rows in this dump). Suite green (1681 passed, 66 skipped).
+     - **Real dump (1m20s):** 13 entity columns, 140,862 cells (4,494 `[id, name]`, 801 literals); 9 columns and 30,634 cells
+       added by this batch. **0 mismatches** against the pre-batch-1 names, in `report.json` and the HTML payload.
+       Script and results: `m2-step1/verify-batches.py`, `verify-batch2-results.txt` (baseline is `before-batch1/`).
+     - **Size:** `report.json` 85.21 → 82.68 MB; HTML 3.021 → 2.906 MB (smaller this time: the string pool no longer holds
+       these names, and few of them need an `[id, name]` pair).
+     - **Not changed on purpose:** Event Leak "Subscriber Type" (names are truncated to 100 characters, so some will not
+       match an entity), Object Shape "Value Type" (a Yes/No column, not a type).
+   - **Still to do:** the remaining type columns (see `m2-step1/column-match-results.txt`), in batches. Pre-rendered
      HTML (large reports) skips the pass, same as the string pool.
 4. **Thread retention observations** *(pending)* — first check whether requesting the thread-retention value from `ThreadAnalyzer` makes the tool do extra work on every run (declare it optional, and confirm Stage B is not newly triggered). — per D3. Needs the analyzer change; check that it
    stays a raw measure and does not add new judgment.

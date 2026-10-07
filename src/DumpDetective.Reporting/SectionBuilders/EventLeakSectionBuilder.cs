@@ -144,7 +144,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(p.EstimatedRetainedBytes > 0 ? FormatHelper.FormatBytes(p.EstimatedRetainedBytes) : "-")]));
             }
             compactTables.Add(STCompact("Publisher events by subscriber count",
-                new[] { CH("Publisher Type"), CH("Event Field"), CH("Subscribers","number"), CH("Instances","number"), CH("Estimated (type-average, all instances)","bytes") },
+                new[] { CHType("Publisher Type"), CH("Event Field"), CH("Subscribers","number"), CH("Instances","number"), CH("Estimated (type-average, all instances)","bytes") },
                 pubRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -193,7 +193,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(FormatEventCategory(g.IsTimerEvent, g.IsPropertyChangedEvent))]));
             }
             compactTables.Add(STCompact("Leak groups",
-                new[] { CH("Publisher Type"), CH("Event Field"), CH("Static"), CH("Severity","number"), CH("Instances","number"), CH("Subscribers","number"), CH("Avg Subs"), CH("Min/Max"), CH("Estimated (type-average, all instances)","bytes"), CH("Dup Subs"), CH("Lifetime Mismatch"), CH("Disposed but Subscribed","number"), CH("Category") },
+                new[] { CHType("Publisher Type"), CH("Event Field"), CH("Static"), CH("Severity","number"), CH("Instances","number"), CH("Subscribers","number"), CH("Avg Subs"), CH("Min/Max"), CH("Estimated (type-average, all instances)","bytes"), CH("Dup Subs"), CH("Lifetime Mismatch"), CH("Disposed but Subscribed","number"), CH("Category") },
                 groupRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -217,7 +217,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell($"{inst.DuplicateSubscriptionCount:N0}", inst.DuplicateSubscriptionCount)]));
             }
             compactTables.Add(STCompact("Top leak instances",
-                new[] { CH("Publisher Type"), CH("Event Field"), CH("Static"), CH("Publisher Addr"), CH("Severity","number"), CH("Subscribers","number"), CH("Root Hint"), CH("Publisher Gen"), CH("Dup Subs","number") },
+                new[] { CHType("Publisher Type"), CH("Event Field"), CH("Static"), CH("Publisher Addr"), CH("Severity","number"), CH("Subscribers","number"), CH("Root Hint"), CH("Publisher Gen"), CH("Dup Subs","number") },
                 instRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

@@ -6,6 +6,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
 
 using FluentAssertions;
 
@@ -92,6 +93,24 @@ public sealed class CrashAnalyzerRetypingCharacterizationTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_ActiveException_NamesItsThreadAsASecondSubject_AfterTheExceptionType()
+    {
+        var threads = new FakeRuntimeThreadQuery();
+        threads.AddActiveExceptionThread(osThreadId: 7, managedThreadId: 3, exceptionAddress: 0x1000);
+        var sink = new CollectingObservationSink();
+
+        await Analyze(threads: threads, observations: sink, candidates: [Candidate(0x1000, "System.NullReferenceException")]);
+
+        foreach (string observationType in new[] { "runtime.active-exception", "runtime.crash-thread-candidate" })
+        {
+            IReadOnlyList<EntityRef> subjects = sink.Observations.Single(o => o.ObservationType == observationType).Subjects;
+            subjects.Should().HaveCount(2, observationType);
+            subjects[0].Should().BeOfType<TypeRef>(observationType + ": the synthesis rules read Subjects[0] as the exception type");
+            subjects[1].Should().BeOfType<ThreadRef>().Which.OsThreadId.Should().Be(7u);
+        }
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_NoStackTraceStringText_FallsBackToBinaryUnwoundTrace()
     {
         // No "_stackTraceString" set -- exception was thrown/unwound but never had .ToString()/
@@ -175,11 +194,12 @@ public sealed class CrashAnalyzerRetypingCharacterizationTests
         FakeRuntimeThreadQuery? threads = null,
         FakeHeapRootPathQuery? rootPaths = null,
         IReadOnlySet<ulong>? aggregateAddresses = null,
+        IObservationSink? observations = null,
         params HeapObjectRef[] candidates)
     {
         CrashAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
-            Observations = NoOpObservationSink.Instance,
+            Observations = observations ?? NoOpObservationSink.Instance,
             ArtifactId = new ArtifactId("test"),
             DumpObjectFields = fields ?? new FakeDumpObjectFieldQuery(),
             DumpArrayShapes = arrayShapes ?? new FakeDumpArrayShapeQuery(),

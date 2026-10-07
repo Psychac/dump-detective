@@ -312,12 +312,21 @@ sequencing, what exists today, and decisions before starting.
      - **Rule decided 2026-10-07:** group by fact kind, one labelled row per kind with its own measures; no folding across kinds
        except an allow-list of the generation measures (`gen0.count`, `gen1.count`, `gen2.count`, `gen2.bytes`). Within a kind with many
        facts: sum counts and shallow bytes, show count + min + max for `retained.bytes`, never a sum.
-6. **Thread facts name their thread** *(pending, before the thread dossier)* — measured in step 1: the
-   active-exception and crash-thread-candidate observations point at the exception *type* only, so the
-   thread page would miss exceptions. Add the thread as a second subject on those observations
-   (`ThreadAnalyzer`, crash analyzer). Check first what thread id each emits (tables show managed and OS
-   id; `ThreadRef` has OS id only). Full stack traces: step 1 found only a top frame per thread in the
-   report; whether to store full traces is a separate decision, not made here.
+6. **Thread facts name their thread** *(done 2026-10-07, verified on the reference dump; uncommitted)* — measured in step 1: the
+   active-exception and crash-thread-candidate observations pointed at the exception *type* only, so the thread page would have missed exceptions.
+   - **Change:** `CrashAnalyzer` adds a `ThreadRef` (OS thread id) as a **second** subject on `runtime.active-exception` and
+     `runtime.crash-thread-candidate`. The exception type stays `Subjects[0]`, which is where `CrashSynthesisRule`, `ActiveCrashInsightRule` and
+     `FatalExceptionOnHeapInsightRule` read it; checked by reading every consumer. The trend differ only looks at facts with no subjects.
+   - **Registry:** both types now `type+thread` in `observation-type-registry.json` (1.94.0 → 1.95.0), following the existing `type+method` precedent.
+   - **Thread ids:** the crash analyzer's thread query already carries the OS id, so no id mapping was needed; the managed id is not set, same as
+     the thread analyzer's own facts.
+   - **Not done:** full stack traces. The report still carries only a top frame per thread; storing full traces remains a separate decision.
+   - **Tests:** 1 new in `CrashAnalyzerRetypingCharacterizationTests` (both facts get the thread second, type first); suite green apart from the
+     known flaky Array test. Panel harness: 3 new checks, 35 of 35 pass.
+   - **Real dump (1m22s):** observation count unchanged (97,417), entities unchanged (14,588), all 82 claim ids and cross-domain titles/severities
+     identical to before. The `IndexOutOfRangeException` facts now name thread 24088, which is also the thread with the largest retained bytes
+     (22.7 MB); its entity row holds exception, crash-candidate, retained-bytes, stack-cluster and state facts. Results: `m2-step1/step6-results.txt`.
+   - **Panel:** the thread page now expects an "Exceptions and async" panel and lists it as absent for threads without one.
 7. **Thread dossier** *(pending)* — same layout; first report surface for per-thread retention.
 8. **Anchors** *(pending)* — `#entity/type/<name>`, `#entity/thread/<id>`. A broken anchor fails the
    build ([§ 9.5](ReportSystemVision.md#95-citation-and-anchoring)).

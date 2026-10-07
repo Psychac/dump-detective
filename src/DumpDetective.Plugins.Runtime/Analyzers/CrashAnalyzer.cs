@@ -176,6 +176,10 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
         // original-stack-trace tier is only resolved in BuildCrashThreadSnapshotsImpl, and
         // CrashSynthesisRule's confidence and caveats read it. Snapshot order is the candidates'
         // own descending-ActiveExceptionCount order, which the rule trusts.
+        // The exception type stays Subjects[0], where the synthesis rules read it; the thread is a second subject so the
+        // thread's own page can find the exception.
+        private static ThreadRef ThreadSubject(uint osThreadId) => new() { OsThreadId = osThreadId, Fidelity = MatchFidelity.Exact };
+
         private static async ValueTask EmitCrashThreadCandidateObservationsAsync(
             AnalysisContext context, CrashDomainResult result, CancellationToken cancellationToken)
         {
@@ -189,7 +193,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 {
                     Id = ObservationId.NewId(),
                     ObservationType = "runtime.crash-thread-candidate",
-                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }, ThreadSubject(candidate.OSThreadId)],
                     When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
                     Measures = new Dictionary<string, Measure>
                     {
@@ -367,7 +371,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                         {
                             Id = ObservationId.NewId(),
                             ObservationType = "runtime.active-exception",
-                            Subjects = [candidate.Type],
+                            Subjects = [candidate.Type, ThreadSubject(activeContext.OSThreadId)],
                             When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
                             Measures = new Dictionary<string, Measure>
                             {

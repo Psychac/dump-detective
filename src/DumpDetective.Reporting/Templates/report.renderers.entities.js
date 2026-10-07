@@ -5,7 +5,7 @@ import { el, t } from './report.dom.js';
 import { findingAnchorId } from './report.renderers.shared.js';
 
 const ENTITY_TYPE_PANELS = ['Size and population', 'Generations and heaps', 'Retention', 'Lifecycle', 'Shape and cost', 'Exceptions and async'];
-const ENTITY_THREAD_PANELS = ['State', 'Retention'];
+const ENTITY_THREAD_PANELS = ['State', 'Retention', 'Exceptions and async'];
 const ENTITY_PANEL_ORDER = ENTITY_TYPE_PANELS.concat(['State', 'Other']);
 
 let _entityTable = null;

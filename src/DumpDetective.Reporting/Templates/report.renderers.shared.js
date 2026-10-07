@@ -16,6 +16,23 @@ let _stringPool = null;
 export function setStringPool(pool) {
   _stringPool = Array.isArray(pool) ? pool : null;
 }
+// ── Entity table (docs/ReportStructure/m2-entities-plan.md, D1) ──────────────────────────────
+// A column whose header type starts with "entity:" holds entity-table references: a number is an
+// entity id, [id, "name"] is an id plus the exact name the table showed (the entity table merges
+// compiler-generated names), and a string is a literal that had no entity.
+let _entities = null;
+export function setEntities(entities) {
+  _entities = Array.isArray(entities) ? entities : null;
+}
+export function isEntityColumn(meta) {
+  return !!(meta && typeof meta.type === 'string' && meta.type.startsWith('entity:'));
+}
+export function resolveEntityCell(value) {
+  if (Array.isArray(value)) return value.length > 1 && value[1] != null ? value[1] : resolveEntityCell(value[0]);
+  if (typeof value !== 'number' || !_entities) return value;
+  const entity = _entities[value];
+  return entity ? entity.joinKey : value;
+}
 export function resolveStr(value) {
   if (typeof value !== 'number' || !_stringPool) return value;
   const resolved = _stringPool[value];

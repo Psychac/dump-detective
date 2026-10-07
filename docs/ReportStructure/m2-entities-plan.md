@@ -99,15 +99,58 @@ sequencing, what exists today, and decisions before starting.
    - **Not checked:** that two real runs give byte-identical tables (unit tests only; one real run done).
    - **Noticed:** an object's `JoinKey` embeds the full dump path (`<dump path>:0x...`), so the 55 object rows
      repeat the path. Fine for now; revisit when object dossiers (M2c) are designed.
-3. **Entity-typed columns and entity cells (D1)** *(pending)* — the entity table's wire reference.
-   - A column is marked an entity column through `CompactHeader.Type` (e.g. `entity:type`); no new
-     column-typing mechanism. Entity cells carry the entity's integer id.
-   - Producers resolve the name to an entity; low-fidelity types (closures, async state machines) keep
-     their fidelity flag.
-   - `ReportStringPool` must skip entity columns, with a test: an id read as a pool index would corrupt the cell.
-   - Markdown, text and the HTML client resolve ids back to names. Goldens for the affected sections
-     re-bless once, in one reviewed step.
-   - Gate: real-dump payload size before and after; fingerprints unchanged.
+3. **Entity-typed columns and entity cells (D1)** *(pending, in batches)* — the entity table's wire reference.
+   - **What it buys (corrected 2026-10-07):** not payload size. The string pool already collapses repeated
+     type names to small numbers, so moving them to the entity table is roughly size-neutral (step 1's
+     8.4 MB figure was measured before pooling). The gain is that type cells become linkable to a dossier.
+   - A column is marked an entity column in its builder through `CompactHeader.Type` (e.g. `entity:type`),
+     decided per column, not by header name: `Types`, `Top Types`, `Live Types` and `Held Lock Types` may be
+     lists, and `Wait Type` / `Task Type` may not be .NET types. No new column-typing mechanism.
+   - One shared pass at write time swaps names for entity ids, for `report.json` and the HTML only, so
+     Markdown and text still see names. A name missing from the entity table stays as text.
+   - `ReportStringPool` must skip entity columns, with a test: both use plain numbers in a cell, so an id read
+     as a pool index would corrupt it.
+   - The HTML client gets an id-to-name lookup, beside its two existing cell translators (render and
+     download-JSON); the download must resolve entity ids back to names.
+   - **Batches (decided 2026-10-07):** a few tables at a time, each batch verified on the reference dump
+     before the next. Batch 1 starts with the largest type columns from step 1 (finalizer queue, Memory,
+     GC Generation, Leak Candidate, Object Shape, Allocation Pattern). Goldens re-bless per batch.
+   - **Decided 2026-10-07 (cell format, option B):** the entity table merges compiler-generated names
+     (`DisplayClass132_0` and `DisplayClass18_1` both become `...+<>c__DisplayClass`, fidelity Low), but tables
+     show the exact name; ~6% of the cells in the biggest type columns are such names (measured:
+     `m2-step1/column-match-results.txt`). An entity cell therefore carries the entity id, plus the exact name
+     only when it differs from the entity's own name. Nothing is lost and every type cell stays clickable.
+     Rejected: leaving merged names as text (closures, often the leak suspects, would not be clickable) and
+     making the table keep exact names (contradicts the canonicalization rule).
+   - **Decided 2026-10-07:** entity ids go into both `report.json` tables and the HTML, so the two files agree.
+     Searching `report.json` for a type name inside a table finds an id; the entity table in the same file resolves it.
+   - Gate per batch: real-dump payload size before and after; fingerprints unchanged.
+   - **Mechanics (built in batch 1):**
+     - A builder marks an entity column with `CHType("Type")` (header type `entity:type`).
+     - `EntityCellPass` rewrites those cells at render time, in `report.json` and the HTML only; Markdown and text
+       read the in-memory tables, which are never rewritten.
+     - `EntityCell` is written as a bare id, or `[id, "exact name"]` when the shown name differs from the entity's.
+     - A name with no entity stays a literal string. `ReportStringPool` skips entity columns.
+     - Client: one `resolveEntityCell` in `report.renderers.shared.js`, used by the table renderer and the
+       download-JSON path. Cells are resolved back to names before display, so the page looks the same; clickable
+       links wait for the dossier (step 5).
+     - `EntityCell` must be listed in `ReportJsonContext` (source-generated serializer); a unit test caught this.
+   - **Batch 1 (done 2026-10-07):** finalizer queue entries (Type Name), Memory "Top types", GC Generation
+     "Per-type generation profiles", Leak Candidate "Top leak candidates". Suite green (1681 passed, 66 skipped);
+     no goldens needed re-blessing.
+     - **Real dump (2026-10-07, 1m14s):** 110,228 cells in the four columns: 2,619 are `[id, name]` pairs, 718 are
+       literals with no entity, the rest bare ids. Resolving them back gives **0 mismatches against the previous run**
+       in both `report.json` and the HTML payload. Script and results: `m2-step1/verify-batch1.py`,
+       `verify-batch1-results.txt`.
+     - **Size:** `report.json` 90.56 → 85.21 MB (-5.4 MB, `report.json` has no string pool, so those type names were full literals in every row and are now ids);
+       HTML 2.946 → 3.021 MB (+75 KB, the `[id, name]` pairs for 2,619 merged names).
+     - **Entity table identical across the two real runs** (14,588 entries): the determinism check that was pending.
+     - **Not browser-tested:** the JavaScript changes were checked by reading and by decoding the payload in Python,
+       not by opening the report in a browser. Do this before the next batch.
+     - **Pre-existing run-to-run variance, unrelated to this work:** String Analysis "Types by string field ownership"
+       and Event Leak "Root Hint" differ between two runs on the same dump.
+   - **Still to do:** the remaining ~20 type columns (see `m2-step1/column-match-results.txt`), in batches. Pre-rendered
+     HTML (large reports) skips the pass, same as the string pool.
 4. **Thread retention observations** *(pending)* — first check whether requesting the thread-retention value from `ThreadAnalyzer` makes the tool do extra work on every run (declare it optional, and confirm Stage B is not newly triggered). — per D3. Needs the analyzer change; check that it
    stays a raw measure and does not add new judgment.
 5. **Type dossier** *(pending)* — Appendix B panels that today's observations can fill: identity,

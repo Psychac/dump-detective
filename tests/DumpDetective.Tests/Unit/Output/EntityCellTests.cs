@@ -1,0 +1,137 @@
+using System.Text.Json;
+using DumpDetective.Core.Configuration;
+using DumpDetective.Reporting.Formatters;
+using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
+using DumpDetective.Sdk.Identity;
+
+using FluentAssertions;
+
+using Xunit;
+
+namespace DumpDetective.Tests.Unit.Output;
+
+public sealed class EntityCellTests
+{
+    private const string ClosureShown = "App.Worker+<>c__DisplayClass132_0";
+    private const string ClosureEntity = "App.Worker+<>c__DisplayClass";
+
+    private static readonly EntityRecord[] Entities =
+    [
+        new(0, EntityKind.Type, "System.Data.DataColumn", MatchFidelity.Exact),
+        new(1, EntityKind.Type, ClosureEntity, MatchFidelity.Low),
+    ];
+
+    [Fact]
+    public void Apply_ExactName_BecomesTheBareEntityId()
+    {
+        AnalysisReportDocument rewritten = EntityCellPass.Apply(DocumentWithRows(["System.Data.DataColumn", 5L]));
+
+        FirstRow(rewritten).Values[0].Should().Be(new EntityCell(0, null));
+        FirstRow(rewritten).Values[1].Should().Be(5L);
+    }
+
+    [Fact]
+    public void Apply_MergedName_KeepsTheExactNameBesideTheId()
+    {
+        AnalysisReportDocument rewritten = EntityCellPass.Apply(DocumentWithRows([ClosureShown, 1L]));
+
+        FirstRow(rewritten).Values[0].Should().Be(new EntityCell(1, ClosureShown));
+    }
+
+    [Fact]
+    public void Apply_NameWithoutAnEntity_StaysALiteral()
+    {
+        AnalysisReportDocument rewritten = EntityCellPass.Apply(DocumentWithRows(["SqlCommand", 1L]));
+
+        FirstRow(rewritten).Values[0].Should().Be("SqlCommand");
+    }
+
+    [Fact]
+    public void Apply_NeverTouchesColumnsThatAreNotEntityColumns_OrTheOriginalDocument()
+    {
+        AnalysisReportDocument original = DocumentWithRows(["System.Data.DataColumn", 5L]);
+
+        AnalysisReportDocument rewritten = EntityCellPass.Apply(original);
+
+        FirstRow(original).Values[0].Should().Be("System.Data.DataColumn");
+        FirstRow(rewritten).Values[0].Should().Be(new EntityCell(0, null));
+
+        AnalysisReportDocument plain = DocumentWithRows(["System.Data.DataColumn", 5L], entityColumn: false);
+        FirstRow(EntityCellPass.Apply(plain)).Values[0].Should().Be("System.Data.DataColumn");
+    }
+
+    [Fact]
+    public void Apply_WithoutAnEntityTable_ChangesNothing()
+    {
+        AnalysisReportDocument withoutEntities = DocumentWithRows(["System.Data.DataColumn", 5L]) with { Entities = null };
+
+        EntityCellPass.Apply(withoutEntities).Should().BeSameAs(withoutEntities);
+    }
+
+    [Fact]
+    public void EntityCell_WritesABareIdOrAnIdAndNamePair_AndReadsBothBack()
+    {
+        JsonSerializer.Serialize(new EntityCell(7, null)).Should().Be("7");
+        JsonSerializer.Serialize(new EntityCell(7, "Exact")).Should().Be("[7,\"Exact\"]");
+        JsonSerializer.Deserialize<EntityCell>("7").Should().Be(new EntityCell(7, null));
+        JsonSerializer.Deserialize<EntityCell>("[7,\"Exact\"]").Should().Be(new EntityCell(7, "Exact"));
+    }
+
+    [Fact]
+    public void RenderedReportJson_CarriesEntityCellsInTheTable_ButMarkdownStillShowsNames()
+    {
+        AnalysisReportDocument document = DocumentWithRows(["System.Data.DataColumn", 5L], [ClosureShown, 6L]);
+
+        string json = new JsonCanonicalReportFormatter().Render(document);
+        AnalyzerDetailSection inMemorySection = document.Domains![0].Sections[0];
+        string markdown = new MarkdownCanonicalReportFormatter().Render(document with { Domains = null, AnalyzerSections = [inMemorySection] });
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        JsonElement rows = parsed.RootElement.GetProperty("domains")[0].GetProperty("sections")[0].GetProperty("compactTables")[0].GetProperty("rows");
+        rows[0][0].GetInt32().Should().Be(0);
+        rows[1][0][0].GetInt32().Should().Be(1);
+        rows[1][0][1].GetString().Should().Be(ClosureShown);
+        markdown.Should().Contain("System.Data.DataColumn").And.Contain(ClosureShown);
+    }
+
+    [Fact]
+    public void StringPool_NeverPoolsALiteralInAnEntityColumn_ButStillPoolsTheSameTextElsewhere()
+    {
+        string repeated = "SqlCommand-with-a-long-enough-name-to-be-worth-pooling";
+        var table = new CompactTable(
+            "t",
+            [new CompactHeader("Type", EntityColumn.Type), new CompactHeader("Other")],
+            [new CompactRow([repeated, repeated]), new CompactRow([repeated, repeated]), new CompactRow([repeated, repeated])]);
+        var section = new AnalyzerDetailSection("A", "A", 0, []) { CompactTables = [table] };
+        var domains = new[] { new ReportDomainSection("Memory", null, [section], []) };
+
+        (IReadOnlyList<ReportDomainSection>? pooledDomains, _, IReadOnlyList<string>? pool) = ReportStringPool.Apply(domains, null);
+
+        pool.Should().ContainSingle().Which.Should().Be(repeated);
+        CompactRow row = pooledDomains![0].Sections[0].CompactTables![0].Rows[0];
+        row.Values[0].Should().Be(repeated);
+        row.Values[1].Should().Be(0);
+    }
+
+    private static CompactRow FirstRow(AnalysisReportDocument document) => document.Domains![0].Sections[0].CompactTables![0].Rows[0];
+
+    private static AnalysisReportDocument DocumentWithRows(object?[] firstRow, object?[]? secondRow = null, bool entityColumn = true)
+    {
+        var rows = new List<CompactRow> { new(firstRow) };
+        if (secondRow is not null)
+            rows.Add(new CompactRow(secondRow));
+
+        var table = new CompactTable(
+            "Top types",
+            [new CompactHeader("Type", entityColumn ? EntityColumn.Type : "string"), new CompactHeader("Count", "number")],
+            rows);
+        var section = new AnalyzerDetailSection("Memory Analysis", "Memory Analysis", 0, []) { CompactTables = [table] };
+        return new SingleDumpReportDocument
+        {
+            DumpPath = "C:/dumps/Crash.dmp",
+            Domains = [new ReportDomainSection("Memory", null, [section], [])],
+            Entities = Entities,
+        };
+    }
+}

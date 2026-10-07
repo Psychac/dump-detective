@@ -114,7 +114,7 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(p.IsFinalizable ? "Yes" : "No")));
             }
             compactTables.Add(STCompact("Per-type generation profiles",
-                new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH","number"), CH("Total Bytes","bytes"), CH("Gen2 Bytes","bytes"), CH("Gen2%", "number", "percent"), CH("Survival Ratio", "number", "ratio"), CH("Finalizable") },
+                new[] { CHType("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH","number"), CH("Total Bytes","bytes"), CH("Gen2 Bytes","bytes"), CH("Gen2%", "number", "percent"), CH("Survival Ratio", "number", "ratio"), CH("Finalizable") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

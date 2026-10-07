@@ -58,8 +58,8 @@ internal static class ReportStringPool
             if (section.CompactTables == null) continue;
             foreach (CompactTable table in section.CompactTables)
                 foreach (CompactRow row in table.Rows)
-                    foreach (object? cell in row.Values)
-                        if (cell is string s)
+                    for (int column = 0; column < row.Values.Length; column++)
+                        if (row.Values[column] is string s && !IsEntityColumn(table, column))
                             frequency[s] = frequency.TryGetValue(s, out int count) ? count + 1 : 1;
         }
     }
@@ -93,19 +93,23 @@ internal static class ReportStringPool
     {
         var result = new List<CompactTable>(tables.Count);
         foreach (CompactTable table in tables)
-            result.Add(table with { Rows = RewriteRows(table.Rows, index) });
+            result.Add(table with { Rows = RewriteRows(table, index) });
         return result;
     }
 
-    private static IReadOnlyList<CompactRow> RewriteRows(IReadOnlyList<CompactRow> rows, Dictionary<string, int> index)
+    // An entity column's numbers are entity ids, so pooling a literal left in one would make the cell ambiguous.
+    private static bool IsEntityColumn(CompactTable table, int column) =>
+        column < table.Headers.Count && EntityColumn.IsEntityColumn(table.Headers[column]);
+
+    private static IReadOnlyList<CompactRow> RewriteRows(CompactTable table, Dictionary<string, int> index)
     {
-        var result = new List<CompactRow>(rows.Count);
-        foreach (CompactRow row in rows)
+        var result = new List<CompactRow>(table.Rows.Count);
+        foreach (CompactRow row in table.Rows)
         {
             object?[] source = row.Values;
             var rewritten = new object?[source.Length];
             for (int i = 0; i < source.Length; i++)
-                rewritten[i] = source[i] is string s && index.TryGetValue(s, out int idx) ? idx : source[i];
+                rewritten[i] = source[i] is string s && !IsEntityColumn(table, i) && index.TryGetValue(s, out int idx) ? idx : source[i];
             result.Add(new CompactRow(rewritten));
         }
         return result;

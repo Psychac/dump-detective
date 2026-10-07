@@ -70,6 +70,9 @@ internal abstract class SectionBuilderBase
     protected static CompactHeader CH(string name, string type = "string", string? format = null, bool sortable = true)
         => new(name, type, format, sortable);
 
+    protected static CompactHeader CHType(string name, bool sortable = true)
+        => new(name, EntityColumn.Type, null, sortable);
+
     protected static CompactRow R(params object?[] values) => new(values);
 
     protected static CompactTable STCompact(string title, IReadOnlyList<CompactHeader> headers, IReadOnlyList<CompactRow> rows, int rowLimit = 20)

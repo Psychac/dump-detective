@@ -72,6 +72,7 @@ async function bootstrap() {
   if (!payload || !payload.doc) return;
   const doc = payload.doc;
   R.setStringPool(doc.strings);
+  R.setEntities(doc.entities);
   if ((!doc.perDumpDocs || !doc.perDumpDocs.length) && Array.isArray(payload.perDumpDocs) && payload.perDumpDocs.length) {
     doc.perDumpDocs = payload.perDumpDocs;
   }

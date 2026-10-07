@@ -49,6 +49,7 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(EnumMetricValue))]
 [JsonSerializable(typeof(CompactHeader))]
 [JsonSerializable(typeof(CompactRow))]
+[JsonSerializable(typeof(EntityCell))]
 [JsonSerializable(typeof(CompactTable))]
 [JsonSerializable(typeof(List<CompactRow>))]
 [JsonSerializable(typeof(List<CompactHeader>))]

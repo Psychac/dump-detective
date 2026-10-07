@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using System.Text;
 using System.Text.RegularExpressions;
 using DumpDetective.Core.Configuration;
+using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Serialization;
 using DumpDetective.Core.Enums;
@@ -67,6 +68,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         // embedded payload directly would need its own pool-resolution path we don't build here.
         if (!shouldPreRender)
         {
+            docForClient = EntityCellPass.Apply(docForClient);
             (IReadOnlyList<ReportDomainSection>? pooledDomains,
                 IReadOnlyList<AnalyzerDetailSection>? pooledTrendSections,
                 IReadOnlyList<string>? stringPool) = ReportStringPool.Apply(

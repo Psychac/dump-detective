@@ -130,7 +130,7 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"0x{t.SampleAddress:X}"),
                     Cell(t.ModuleName ?? "—")));
             }
-                    compactTables.Add(STCompact("Top types", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Sample Addr"), CH("Module") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                    compactTables.Add(STCompact("Top types", new[] { CHType("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Sample Addr"), CH("Module") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.SizeBucketHistogram is { Count: > 0 })

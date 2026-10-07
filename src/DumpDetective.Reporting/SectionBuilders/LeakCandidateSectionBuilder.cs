@@ -86,7 +86,7 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
             blocks.Add(T("Top candidates are ranked by suspicion score; the report highlights likely leak patterns first and then expands the highest-signal rows below."));
                 compactTables.Add(STCompact(
                 "Top leak candidates by suspicion score",
-                    new[] { CH("Type"), CH("Score","number"), CH("Severity"), CH("Class"), CH("Total Size","bytes"), CH("Instances","number"), CH("Gen2%", "number", "percent"), CH("Root Kind"), CH("Finalizable"), CH("Container"), CH("Ref Ratio", "number", "ratio"), CH("Root Chain") },
+                    new[] { CHType("Type"), CH("Score","number"), CH("Severity"), CH("Class"), CH("Total Size","bytes"), CH("Instances","number"), CH("Gen2%", "number", "percent"), CH("Root Kind"), CH("Finalizable"), CH("Container"), CH("Ref Ratio", "number", "ratio"), CH("Root Chain") },
                 leak.TopCandidates.Select(candidate => R(new object?[] {
                     candidate.TypeName,
                     assessments[candidate].SuspicionScore,

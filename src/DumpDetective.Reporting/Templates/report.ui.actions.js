@@ -4,14 +4,24 @@
 function resolveStringPoolForDownload(payload) {
   const report = payload && payload.report ? payload.report : payload;
   const pool = report && Array.isArray(report.strings) ? report.strings : null;
-  if (!pool) return payload;
+  const entities = report && Array.isArray(report.entities) ? report.entities : null;
+  if (!pool && !entities) return payload;
   const clone = JSON.parse(JSON.stringify(payload));
   const clonedReport = clone && clone.report ? clone.report : clone;
   function resolveCell(v, meta) {
+    if (meta && typeof meta.type === 'string' && meta.type.startsWith('entity:')) {
+      if (Array.isArray(v)) return v.length > 1 && v[1] != null ? v[1] : resolveEntityId(v[0]);
+      return resolveEntityId(v);
+    }
+    if (!pool) return v;
     const isNumericColumn = !!(meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format));
     if (isNumericColumn || typeof v !== 'number') return v;
     const resolved = pool[v];
     return resolved !== undefined ? resolved : v;
+  }
+  function resolveEntityId(v) {
+    if (typeof v !== 'number' || !entities) return v;
+    return entities[v] ? entities[v].joinKey : v;
   }
   function resolveSections(sections) {
     if (!Array.isArray(sections)) return;

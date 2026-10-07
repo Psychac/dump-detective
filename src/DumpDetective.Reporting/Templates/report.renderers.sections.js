@@ -6,6 +6,7 @@ import { slugifyAnchor } from './report.renderers.shared.js';
 import { ensureUniqueDomId } from './report.renderers.shared.js';
 import { buildTreeWidget } from './report.renderers.shared.js';
 import { resolveStr } from './report.renderers.shared.js';
+import { isEntityColumn, resolveEntityCell } from './report.renderers.shared.js';
 import { confidenceSlots } from './report.renderers.shared.js';
 
 // Resolves pooled-string cells (see report.renderers.shared.js) back to their literal value.
@@ -16,6 +17,11 @@ function resolvePooledRow(values, headerMeta) {
   let resolved = values;
   for (let i = 0; i < values.length; i++) {
     const meta = headerMeta[i];
+    if (isEntityColumn(meta)) {
+      if (resolved === values) resolved = values.slice();
+      resolved[i] = resolveEntityCell(values[i]);
+      continue;
+    }
     const isNumericColumn = !!(meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format));
     if (!isNumericColumn && typeof values[i] === 'number') {
       if (resolved === values) resolved = values.slice();

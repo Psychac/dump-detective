@@ -79,7 +79,7 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
             compactTables.Add(STCompact("Timer-related objects by type", new[]
             {
-                CH("Type"), CH("Count", "number"), CH("Heap Size", "bytes"),
+                CHType("Type"), CH("Count", "number"), CH("Heap Size", "bytes"),
                 CH("Sample Period"), CH("Sample Callback Owner"), CH("Sample Gen")
             }, compactRows));
 

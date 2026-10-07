@@ -99,7 +99,7 @@ sequencing, what exists today, and decisions before starting.
    - **Not checked:** that two real runs give byte-identical tables (unit tests only; one real run done).
    - **Noticed:** an object's `JoinKey` embeds the full dump path (`<dump path>:0x...`), so the 55 object rows
      repeat the path. Fine for now; revisit when object dossiers (M2c) are designed.
-3. **Entity-typed columns and entity cells (D1)** *(pending, in batches)* — the entity table's wire reference.
+3. **Entity-typed columns and entity cells (D1)** *(done 2026-10-07, 4 batches; batch 4 uncommitted)* — the entity table's wire reference.
    - **What it buys (corrected 2026-10-07):** not payload size. The string pool already collapses repeated
      type names to small numbers, so moving them to the entity table is roughly size-neutral (step 1's
      8.4 MB figure was measured before pooling). The gain is that type cells become linkable to a dossier.
@@ -168,11 +168,19 @@ sequencing, what exists today, and decisions before starting.
        (`m2-step1/verify-batch3-results.txt`).
      - **Size:** `report.json` 82.68 → 82.41 MB; HTML 2.906 → 2.889 MB.
      - **Why 1,939 literals:** types with no entity (short names such as `SqlCommand`) and truncated names. They stay text.
-   - **Still to do (batch 4):** Dominator, Crash, Async Task, Async State Machine, Module, Event Leak "Subscriber Type", Timer, HTTP,
-     Reference Chain, Hang, Collection "Wasteful collections", DB Connection, SQL "Command/Transaction objects by type", Thread
-     exception types. Left alone, not type columns: Object Shape and TypeTable "Value Type" (Yes/No), SQL "Outstanding commands" and
-     Collection "Collections by GC generation" (short names that match no entity), "Top Types" lists, handler-method names.
-     Pre-rendered HTML (large reports) skips the pass, same as the string pool.
+   - **Batch 3 committed** as `c7722c50`.
+   - **Batch 4 (built 2026-10-07, uncommitted):** Dominator (7), Crash (8 incl. "Inner Exception Type"), Async Task (8), Async State
+     Machine "Declaring Type" (2), Module, Event Leak "Subscriber Type", Timer Leak, HTTP, Reference Chain, Hang, DB Connection (3),
+     Thread exception types (2), Collection (4), SQL Command and SQL Transaction "objects by type". Suite green apart from the known
+     flaky `ArrayAnalyzerRetypingCharacterizationTests` (passes alone, also on the previous commit).
+     - **Real dump (1m42s):** 79 entity columns, 158,873 cells (4,586 `[id, name]`, 1,954 literals). **0 mismatches** against the original
+       names in `report.json` and the HTML (`m2-step1/verify-batch4-results.txt`). `report.json` 82.41 → 82.40 MB; HTML 2.889 → 2.888 MB.
+       Few cells added (339): these tables are small.
+     - **Left as text on purpose** (not a .NET type name, or matches no entity): Object Shape and TypeTable "Value Type" (Yes/No),
+       SQL "Outstanding commands" and "Active transactions" Type (short names such as `SqlCommand`), Collection "Collections by GC
+       generation", Crash "Inner Type" (placeholder dashes), Async Task "Result Type" and "Exception Type" (no matches), Async State
+       Machine "Type Name" (no matches), "Top Types" lists, handler-method names.
+     - **Pre-rendered HTML (large reports) skips the pass,** same as the string pool.
 4. **Thread retention observations** *(pending)* — first check whether requesting the thread-retention value from `ThreadAnalyzer` makes the tool do extra work on every run (declare it optional, and confirm Stage B is not newly triggered). — per D3. Needs the analyzer change; check that it
    stays a raw measure and does not add new judgment.
 5. **Type dossier** *(pending)* — Appendix B panels that today's observations can fill: identity,

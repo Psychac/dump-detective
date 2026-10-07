@@ -92,7 +92,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
             var rows = new List<TableRow>(asyncTasks.TopContinuationTypes.Count);
             for (int i = 0; i < asyncTasks.TopContinuationTypes.Count; i++)
                 rows.Add(Row(Cell(asyncTasks.TopContinuationTypes[i].Name), Cell(asyncTasks.TopContinuationTypes[i].Count.ToString("N0"), asyncTasks.TopContinuationTypes[i].Count)));
-            compactTables.Add(STCompact("Continuation types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Continuation types", new[] { CHType("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TopDeepestChains.Count > 0)
@@ -108,7 +108,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(chain.Depth.ToString("N0"), chain.Depth),
                     Cell(FormatHelper.TruncateString(chainText, 80))));
             }
-            compactTables.Add(STCompact("Deepest continuation chains", new[] { CH("Root Address"), CH("Root Type"), CH("Depth","number"), CH("Chain") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Deepest continuation chains", new[] { CH("Root Address"), CHType("Root Type"), CH("Depth","number"), CH("Chain") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TopPendingTaskTypes.Count > 0)
@@ -116,7 +116,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
             var rows = new List<TableRow>(asyncTasks.TopPendingTaskTypes.Count);
             for (int i = 0; i < asyncTasks.TopPendingTaskTypes.Count; i++)
                 rows.Add(Row(Cell(asyncTasks.TopPendingTaskTypes[i].Name), Cell(asyncTasks.TopPendingTaskTypes[i].Count.ToString("N0"), asyncTasks.TopPendingTaskTypes[i].Count)));
-            compactTables.Add(STCompact("Pending task types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Pending task types", new[] { CHType("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TopPendingTaskTypesByBytes is { Count: > 0 } byBytes)
@@ -129,7 +129,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(FormatBytes((ulong)byBytes[i].TotalBytes), byBytes[i].TotalBytes),
                     Cell(byBytes[i].Count.ToString("N0"), byBytes[i].Count)));
             }
-            compactTables.Add(STCompact("Pending task types by retained bytes", new[] { CH("Type"), CH("Total Size","bytes"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Pending task types by retained bytes", new[] { CHType("Type"), CH("Total Size","bytes"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TopFaultedTaskTypes.Count > 0)
@@ -137,7 +137,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
             var rows = new List<TableRow>(asyncTasks.TopFaultedTaskTypes.Count);
             for (int i = 0; i < asyncTasks.TopFaultedTaskTypes.Count; i++)
                 rows.Add(Row(Cell(asyncTasks.TopFaultedTaskTypes[i].Name), Cell(asyncTasks.TopFaultedTaskTypes[i].Count.ToString("N0"), asyncTasks.TopFaultedTaskTypes[i].Count)));
-            compactTables.Add(STCompact("Faulted task types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Faulted task types", new[] { CHType("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (asyncTasks.TopOrphanedTasks.Count > 0)
@@ -156,7 +156,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
             }
 
             compactTables.Add(STCompact("Orphaned tasks",
-                new[] { CH("Address"), CH("Task Type"), CH("Result Type"), CH("Size","bytes"), CH("Exception Type"), CH("Exception Message") },
+                new[] { CH("Address"), CHType("Task Type"), CH("Result Type"), CH("Size","bytes"), CH("Exception Type"), CH("Exception Message") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -174,7 +174,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
             }
 
             compactTables.Add(STCompact("Unresolved TaskCompletionSource instances",
-                new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Generation") },
+                new[] { CH("Address"), CHType("Type"), CH("Size","bytes"), CH("Generation") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -192,7 +192,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
             }
 
             compactTables.Add(STCompact("Pending IValueTaskSource instances",
-                new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Generation") },
+                new[] { CH("Address"), CHType("Type"), CH("Size","bytes"), CH("Generation") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

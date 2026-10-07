@@ -118,7 +118,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
             var rows = new List<TableRow>(limit);
             for (int i = 0; i < limit; i++)
                 rows.Add(Row(Cell(d.TopContinuationTypes[i].Name), Cell(d.TopContinuationTypes[i].Count.ToString("N0"), d.TopContinuationTypes[i].Count)));
-            compactTables.Add(STCompact("Top continuation types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top continuation types", new[] { CHType("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(

@@ -50,7 +50,7 @@ internal sealed class SqlCommandSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 ]));
             }
             compactTables.Add(STCompact("Command objects by type",
-                new[] { CH("Type"), CH("Total","number"), CH("Active","number"), CH("Detached","number"), CH("Heap Size","bytes") },
+                new[] { CHType("Type"), CH("Total","number"), CH("Active","number"), CH("Detached","number"), CH("Heap Size","bytes") },
                 typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

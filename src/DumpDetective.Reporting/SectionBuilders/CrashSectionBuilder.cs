@@ -71,7 +71,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
             var heapTypeRows = new List<TableRow>(Math.Min(crash.ExceptionTypeCounts.Count, TopExceptionTypesToShow));
             foreach (KeyValuePair<string, int> kvp in crash.ExceptionTypeCounts.OrderByDescending(kvp => kvp.Value).Take(TopExceptionTypesToShow))
                 heapTypeRows.Add(Row(Cell(kvp.Key), Cell(kvp.Value.ToString("N0"), kvp.Value)));
-            compactTables.Add(STCompact("Exception type counts (all heap)", new[] { CH("Exception Type"), CH("Count","number") }, heapTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Exception type counts (all heap)", new[] { CHType("Exception Type"), CH("Count","number") }, heapTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Heap size per exception type — HeapEntry.Size summed unconditionally during the scan, so
@@ -83,7 +83,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
             foreach (KeyValuePair<string, ulong> kvp in crash.ExceptionHeapSizeByType.OrderByDescending(kvp => kvp.Value).Take(TopExceptionTypesToShow))
                 sizeRows.Add(Row(Cell(kvp.Key), Cell(FormatBytes(kvp.Value), kvp.Value)));
             compactTables.Add(STCompact("Exception heap size by type",
-                new[] { CH("Exception Type"), CH("Total Size","number") },
+                new[] { CHType("Exception Type"), CH("Total Size","number") },
                 sizeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -107,7 +107,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                     Cell(rp.SearchTruncated ? "Yes" : "No")));
             }
             compactTables.Add(STCompact("Gen2/LOH exception retention paths",
-                new[] { CH("Exception Type"), CH("Address"), CH("Root Kind"), CH("Retention Path"), CH("Truncated") },
+                new[] { CHType("Exception Type"), CH("Address"), CH("Root Kind"), CH("Retention Path"), CH("Truncated") },
                 retentionRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             blocks.Add(T("Retention paths trace each Gen2/LOH exception object back to a GC root, identifying what is keeping it alive (static field, event handler, cache entry, etc.)."));
         }
@@ -118,7 +118,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
             var activeTypeRows = new List<TableRow>(crash.ActiveExceptionTypeCounts.Count);
             foreach (KeyValuePair<string, int> kvp in crash.ActiveExceptionTypeCounts.OrderByDescending(kvp => kvp.Value))
                 activeTypeRows.Add(Row(Cell(kvp.Key), Cell(kvp.Value.ToString("N0"), kvp.Value)));
-            compactTables.Add(STCompact("Active exception type counts", new[] { CH("Exception Type"), CH("Active Count","number") }, activeTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Active exception type counts", new[] { CHType("Exception Type"), CH("Active Count","number") }, activeTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // AggregateException inner exception types — the outer "AggregateException" count in the
@@ -129,7 +129,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
             foreach (KeyValuePair<string, int> kvp in crash.AggregateInnerExceptionTypeCounts.OrderByDescending(kvp => kvp.Value))
                 innerTypeRows.Add(Row(Cell(kvp.Key), Cell(kvp.Value.ToString("N0"), kvp.Value)));
             compactTables.Add(STCompact("AggregateException inner exception types (unwrapped)",
-                new[] { CH("Inner Exception Type"), CH("Count","number") },
+                new[] { CHType("Inner Exception Type"), CH("Count","number") },
                 innerTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             blocks.Add(T($"{crash.AggregateExceptionCount:N0} AggregateException instance(s) were unwrapped; the table above attributes their InnerExceptions to the real underlying fault types."));
         }
@@ -150,7 +150,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                     Cell(dist.MostCommonActiveMessage ?? "—"),
                     Cell(dist.MostCommonActiveMessageCount.ToString("N0"), dist.MostCommonActiveMessageCount)));
             compactTables.Add(STCompact("Exception message distribution per type",
-                new[] { CH("Exception Type"), CH("Sampled","number"), CH("Distinct Messages","number"), CH("Most Common Message"), CH("Count","number"), CH("Most Common Active Message"), CH("Active Count","number") },
+                new[] { CHType("Exception Type"), CH("Sampled","number"), CH("Distinct Messages","number"), CH("Most Common Message"), CH("Count","number"), CH("Most Common Active Message"), CH("Active Count","number") },
                 messageRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -172,7 +172,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                     Cell($"0x{bucket.SampleAddress:X}")));
             }
             compactTables.Add(STCompact("Crash buckets (exception type + top user frame)",
-                new[] { CH("Exception Type"), CH("Top User Frame"), CH("Instances","number"), CH("Active Instances","number"), CH("Sample Address") },
+                new[] { CHType("Exception Type"), CH("Top User Frame"), CH("Instances","number"), CH("Active Instances","number"), CH("Sample Address") },
                 bucketRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             CrashBucket topBucket = crash.CrashBuckets[0];
@@ -282,7 +282,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                     Cell(ex.IsRethrown ? "Yes" : "No")));
             }
             compactTables.Add(STCompact("Exception instances",
-                new[] { CH("Type"), CH("Address"), CH("Message"), CH("HRESULT"), CH("Inner Type"), CH("Chain Depth","number"), CH("Status"), CH("Thread","number"), CH("OS Thread","number"), CH("Rethrown") },
+                new[] { CHType("Type"), CH("Address"), CH("Message"), CH("HRESULT"), CH("Inner Type"), CH("Chain Depth","number"), CH("Status"), CH("Thread","number"), CH("OS Thread","number"), CH("Rethrown") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             var depthBuckets = new Dictionary<int, int>();

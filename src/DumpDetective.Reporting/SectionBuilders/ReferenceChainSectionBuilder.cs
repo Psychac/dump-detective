@@ -95,7 +95,7 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
             var rtRows = new List<TableRow>(retainedTypes.Count);
             for (int i = 0; i < retainedTypes.Count; i++)
                 rtRows.Add(new TableRow([Cell(FormatHelper.TruncateString(retainedTypes[i], 80))]));
-            compactTables.Add(STCompact("Retained types", new[] { CH("Type") }, rtRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Retained types", new[] { CHType("Type") }, rtRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var rootKindDistribution = d.RootKindDistribution ?? [];

@@ -136,7 +136,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             if (topTypeRows.Count > 0)
             {
                 compactTables.Add(STCompact("Top types in heaviest modules",
-                    new[] { CH("Module"), CH("Type"), CH("Objects", "number"), CH("Bytes", "bytes") },
+                    new[] { CH("Module"), CHType("Type"), CH("Objects", "number"), CH("Bytes", "bytes") },
                     topTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }

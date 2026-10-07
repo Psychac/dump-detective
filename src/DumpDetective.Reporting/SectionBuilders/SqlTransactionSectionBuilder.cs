@@ -52,7 +52,7 @@ internal sealed class SqlTransactionSectionBuilder : SectionBuilderBase, IAnalyz
                 ]));
             }
             compactTables.Add(STCompact("Transaction objects by type",
-                new[] { CH("Type"), CH("Total","number"), CH("Active","number"), CH("Disposed","number"), CH("Other","number"), CH("Heap Size","bytes") },
+                new[] { CHType("Type"), CH("Total","number"), CH("Active","number"), CH("Disposed","number"), CH("Other","number"), CH("Heap Size","bytes") },
                 typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

@@ -60,7 +60,7 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
                 ]));
             }
             compactTables.Add(STCompact("Connection objects by type",
-                new[] { CH("Type"), CH("Total","number"), CH("Open","number"), CH("Closed","number"), CH("Broken","number"), CH("Other","number"), CH("Unknown","number"), CH("Heap Size","bytes") },
+                new[] { CHType("Type"), CH("Total","number"), CH("Open","number"), CH("Closed","number"), CH("Broken","number"), CH("Other","number"), CH("Unknown","number"), CH("Heap Size","bytes") },
                 typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -79,7 +79,7 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
                 ]));
             }
             compactTables.Add(STCompact("Top open connections",
-                new[] { CH("Type"), CH("Address"), CH("State") },
+                new[] { CHType("Type"), CH("Address"), CH("State") },
                 openRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -102,7 +102,7 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
         if (rootPathRows.Count > 0)
         {
             compactTables.Add(STCompact("Retention paths (Gen2 open connections)",
-                new[] { CH("Type"), CH("Address"), CH("Retained"), CH("GC Root Path") },
+                new[] { CHType("Type"), CH("Address"), CH("Retained"), CH("GC Root Path") },
                 rootPathRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

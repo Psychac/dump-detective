@@ -146,7 +146,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             var exTypeRows = new List<TableRow>(d.ExceptionTypeDistribution.Count);
             foreach (var kvp in d.ExceptionTypeDistribution.OrderByDescending(kvp => kvp.Value))
                 exTypeRows.Add(new TableRow([Cell(kvp.Key), Cell($"{kvp.Value:N0}", kvp.Value)]));
-            compactTables.Add(STCompact("Exception type distribution", new[] { CH("Exception Type"), CH("Count","number") }, exTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Exception type distribution", new[] { CHType("Exception Type"), CH("Count","number") }, exTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.ThreadsWithActiveExceptions is { Count: > 0 })
@@ -164,7 +164,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(snapshot.GcMode),
                     Cell(snapshot.TopFrames.Count > 0 ? snapshot.TopFrames[0] : "—")]));
             }
-            compactTables.Add(STCompact("Threads with active exceptions", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Exception Type"), CH("Message"), CH("Lock Count","number"), CH("GC Mode"), CH("Top Frame") }, exRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Threads with active exceptions", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CHType("Exception Type"), CH("Message"), CH("Lock Count","number"), CH("GC Mode"), CH("Top Frame") }, exRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var hotspots = d.TopStackHotspots ?? [];

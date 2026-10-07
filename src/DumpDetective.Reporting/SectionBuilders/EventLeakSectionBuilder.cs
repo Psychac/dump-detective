@@ -155,7 +155,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
             for (int i = 0; i < topSubscriberTypes.Count; i++)
                 rows.Add(R(FormatHelper.TruncateString(topSubscriberTypes[i].Name, 100), topSubscriberTypes[i].Count));
             compactTables.Add(STCompact("Top subscriber types across all groups",
-                new[] { CH("Subscriber Type"), CH("Subscriptions", "number") },
+                new[] { CHType("Subscriber Type"), CH("Subscriptions", "number") },
                 rows));
         }
 

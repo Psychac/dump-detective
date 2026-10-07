@@ -109,7 +109,7 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell($"{shareOfTotal:F1}%", shareOfTotal)]));
             }
             compactTables.Add(STCompact("Wasted memory by element type",
-                new[] { CH("Element Type"), CH("Wasteful Count","number"), CH("Wasted","bytes"), CH("Share of Waste") },
+                new[] { CHType("Element Type"), CH("Wasteful Count","number"), CH("Wasted","bytes"), CH("Share of Waste") },
                 elementTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -137,7 +137,7 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(c.Recommendation)]));
             }
             compactTables.Add(STCompact("Wasteful collections",
-                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root"), CH("Owner (hint)"), CH("Recommendation") },
+                new[] { CHType("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CHType("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root"), CH("Owner (hint)"), CH("Recommendation") },
                 wcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (topWasteful.Count > limit)
             {
@@ -165,7 +165,7 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                         Cell(c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value.ToString("N0") : "—", c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value : null)]));
                 }
                 compactTables.Add(STCompact("Wasteful queues — buffer layout",
-                    new[] { CH("Type"), CH("Count","number"), CH("Capacity","number"), CH("Head","number"), CH("Tail","number"), CH("Largest Free Gap"), CH("Free Segments","number") },
+                    new[] { CHType("Type"), CH("Count","number"), CH("Capacity","number"), CH("Head","number"), CH("Tail","number"), CH("Largest Free Gap"), CH("Free Segments","number") },
                     qRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }

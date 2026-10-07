@@ -63,7 +63,7 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 ]));
             }
             compactTables.Add(STCompact("HTTP objects by type",
-                new[] { CH("Type"), CH("Count","number"), CH("Heap Size","bytes") },
+                new[] { CHType("Type"), CH("Count","number"), CH("Heap Size","bytes") },
                 typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

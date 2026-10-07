@@ -5,4 +5,5 @@ export * from './report.renderers.header.js';
 export * from './report.renderers.nav.js';
 export * from './report.renderers.panels.js';
 export * from './report.renderers.findings.js';
+export * from './report.renderers.entities.js';
 export * from './report.renderers.sections.js';

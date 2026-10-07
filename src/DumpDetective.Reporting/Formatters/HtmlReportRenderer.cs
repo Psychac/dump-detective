@@ -246,6 +246,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.nav.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.panels.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.findings.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.entities.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.sections.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.toc.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.integrity.js")));

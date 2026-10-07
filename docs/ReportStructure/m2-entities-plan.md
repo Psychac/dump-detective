@@ -197,7 +197,7 @@ sequencing, what exists today, and decisions before starting.
      and all 9 got a value; none with roots was missing one. Largest: thread 24088 retains 22.7 MB, 2392 retains 10.1 MB, 11768 retains
      2.2 MB. Entities unchanged (14,588). Results: `m2-step1/step4-results.txt`.
    - **Not shown anywhere yet:** nothing in the report reads these observations until the thread dossier (step 7).
-5. **Type dossier** *(5a data done and committed `e6661e52`; 5b-1 claim links built, uncommitted; 5b-2 page pending)* — panels filled from the facts that name a type. Catalog of the 45
+5. **Type dossier** *(5a `e6661e52` and 5b-1 `e3c47be7` committed; 5b-2 panel built; user opened it in a browser 2026-10-07 and found it good for now, refinement later)* — panels filled from the facts that name a type. Catalog of the 45
    fact kinds that name a type on the reference dump: `m2-step1/type-observation-catalog.txt`.
    - **Same number from several analyzers (decided: folded).** Instance count comes from ~15 fact kinds and shallow bytes from ~17.
      The page does not merge them or pick a winner (that would be judgment, which the entity layer does not make). It shows one row per
@@ -256,8 +256,30 @@ sequencing, what exists today, and decisions before starting.
          independently from the side-car and claim lineage: **0 mismatched entities**, id list identical; every id exists in the HTML. For
          `DataColumn`: LOH array pressure, high Gen2 finalizable count, finalizer queue retaining ~578.6 MB, DataTable lifecycle pattern,
          leak candidate cluster. Size: `report.json` 84.59 → 84.61 MB, HTML 3.103 → 3.108 MB. Results: `m2-step1/verify-claims-results.txt`.
-     - **5b-2 — the panel (pending):** panel layout, click handler, URL handling, heavy-entity display (counts and totals per fact kind, raw rows stay
-       in the side-car).
+     - **5b-2 — the panel (built 2026-10-07; not yet opened in a browser):**
+       - **Files:** new `Templates/report.renderers.entities.js` (registered in the csproj, the inline bundle and the module barrel), CSS appended to
+         `report.utilities.css`, small changes in `report.renderers.shared.js` (`describeEntityCell`), `report.renderers.sections.js` (entity cells carry
+         their id into the table) and `report.main.js` (`setEntityData`, `setupEntityPanel`). No server-side change.
+       - **Behaviour:** an entity cell becomes a link `#entity/<kind>/<encoded name>`; the browser's own hash handling opens the slide-over (so
+         middle-click, copy-link and the back button work). Esc or the close button closes it and restores the address the reader came from.
+         Moving to any other address (for example a claim link) closes it. Names are written with `textContent` only, never as markup.
+       - **Contents:** identity and fidelity (a Low entity explains that numbered compiler-generated names are merged), counts of claims and facts,
+         Claims (most severe first, each linking to its finding card when the card exists), then one block per fact kind under its panel, then the
+         Relations slot ("Not built yet"), then a line naming the panels with no facts, then a note that raw facts are in the side-car.
+       - **Numbers:** one fact shows its value; several facts show `total X (min, max)` when the tool allowed summing, and a range when it did not
+         (retained bytes, ratios). A measure that never varies shows one value. Bytes are in human units with the exact count as a tooltip.
+       - **Not done, deliberately:** folding the generation measures across fact kinds (decided earlier). The panel lists each fact kind separately; the
+         fold is a space-saver, not a correctness feature, and can be added if the pages feel repetitive.
+       - **Existing behaviour checked by reading:** the TOC/permalink click handler only intercepts `.toc a, .permalink`, and the `hashchange` handler
+         ignores an address that matches no element id, so neither interferes. Table cell clamping skips any cell that contains a link.
+       - **Pre-rendered HTML (large reports)** has no links, same as the string pool and entity cells.
+       - **Verification (`m2-step1/panel-test.mjs`, results in `panel-test-results.txt`):** the real inline bundle from the generated HTML passes
+         `node --check`; the real panel module is run in Node against the real payload from that HTML, with a minimal stand-in for the page. 32 of 32
+         checks pass: link and address round trip (including a closure with an exact name), `DataColumn` page content (5 claims, 54,005 facts, shallow
+         bytes as a total, retained bytes as a range), a card-less claim shown as text, a thread page, Esc and address restore, unknown and broken
+         addresses, markup in a name, leaving the address closes the panel. A C# test pins that the bundle contains the panel.
+       - **Not verified:** how it looks (spacing, colours, width on small screens), real focus and scroll behaviour, the panel over the report's other
+         fixed elements, and opening a claim card inside a collapsed section. These need a person to open the report.
    - **An unmapped fact kind goes under an "Other" panel with its name,** so a new analyzer cannot make facts disappear.
    - **Summary design (decided 2026-10-07):** built at write time from the observations, next to `EntityTableBuilder`,
      attached to the document beside `Entities`, in both `report.json` and the HTML. Estimated 0.16-0.21 MB in the HTML (measured above).

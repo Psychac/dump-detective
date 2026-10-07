@@ -33,6 +33,12 @@ export function resolveEntityCell(value) {
   const entity = _entities[value];
   return entity ? entity.joinKey : value;
 }
+// The id and the name an entity cell stands for, or null for a literal; the table keeps the id so the cell can link.
+export function describeEntityCell(value) {
+  if (Array.isArray(value)) return value.length > 1 && value[1] != null ? { id: value[0], name: value[1] } : describeEntityCell(value[0]);
+  if (typeof value !== 'number' || !_entities || !_entities[value]) return null;
+  return { id: value, name: _entities[value].joinKey };
+}
 export function resolveStr(value) {
   if (typeof value !== 'number' || !_stringPool) return value;
   const resolved = _stringPool[value];

@@ -73,6 +73,7 @@ async function bootstrap() {
   const doc = payload.doc;
   R.setStringPool(doc.strings);
   R.setEntities(doc.entities);
+  R.setEntityData(doc);
   if ((!doc.perDumpDocs || !doc.perDumpDocs.length) && Array.isArray(payload.perDumpDocs) && payload.perDumpDocs.length) {
     doc.perDumpDocs = payload.perDumpDocs;
   }
@@ -222,6 +223,7 @@ async function bootstrap() {
   document.querySelectorAll('.analyzer-section details').forEach(function (d) { const s = d.querySelector('summary'); if (s) s.setAttribute('aria-expanded', String(d.open)); d.addEventListener('toggle', function () { if (s) s.setAttribute('aria-expanded', String(d.open)); }); });
 
   UI.setupInteractivity(doc, announce);
+  R.setupEntityPanel();
 }
 
 bootstrap().catch(err => {

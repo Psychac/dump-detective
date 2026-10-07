@@ -114,6 +114,16 @@ public sealed class EntityCellTests
         row.Values[1].Should().Be(0);
     }
 
+    [Fact]
+    public void RenderedHtml_BundlesTheEntityPanelAndStartsIt()
+    {
+        string html = new HtmlReportRenderer().Render(DocumentWithRows(["System.Data.DataColumn", 5L]));
+
+        html.Should().Contain("function setupEntityPanel").And.Contain("function openEntityPanel")
+            .And.Contain("function decorateEntityCell").And.Contain("setupEntityPanel();")
+            .And.Contain(".entity-panel");
+    }
+
     private static CompactRow FirstRow(AnalysisReportDocument document) => document.Domains![0].Sections[0].CompactTables![0].Rows[0];
 
     private static AnalysisReportDocument DocumentWithRows(object?[] firstRow, object?[]? secondRow = null, bool entityColumn = true)

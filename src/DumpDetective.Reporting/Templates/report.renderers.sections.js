@@ -6,7 +6,8 @@ import { slugifyAnchor } from './report.renderers.shared.js';
 import { ensureUniqueDomId } from './report.renderers.shared.js';
 import { buildTreeWidget } from './report.renderers.shared.js';
 import { resolveStr } from './report.renderers.shared.js';
-import { isEntityColumn, resolveEntityCell } from './report.renderers.shared.js';
+import { isEntityColumn, resolveEntityCell, describeEntityCell } from './report.renderers.shared.js';
+import { decorateEntityCell } from './report.renderers.entities.js';
 import { confidenceSlots } from './report.renderers.shared.js';
 
 // Resolves pooled-string cells (see report.renderers.shared.js) back to their literal value.
@@ -19,7 +20,8 @@ function resolvePooledRow(values, headerMeta) {
     const meta = headerMeta[i];
     if (isEntityColumn(meta)) {
       if (resolved === values) resolved = values.slice();
-      resolved[i] = resolveEntityCell(values[i]);
+      const entityRef = describeEntityCell(values[i]);
+      resolved[i] = entityRef ? { display: entityRef.name, entityId: entityRef.id } : resolveEntityCell(values[i]);
       continue;
     }
     const isNumericColumn = !!(meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format));
@@ -493,6 +495,7 @@ export function buildAnalyzerSection(section, i) {
                 } catch (e) {
                   td.textContent = extractCellDisplay(cellData);
                 }
+                if (cellData && cellData.entityId != null) decorateEntityCell(td, cellData.entityId, td.textContent);
               tr.appendChild(td);
             }
             if (limit > 0 && rowCount > limit && ri >= limit) {

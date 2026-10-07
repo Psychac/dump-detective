@@ -26,6 +26,7 @@
     <EmbeddedResource Include="Templates\report.renderers.nav.js" />
     <EmbeddedResource Include="Templates\report.renderers.panels.js" />
     <EmbeddedResource Include="Templates\report.renderers.findings.js" />
+    <EmbeddedResource Include="Templates\report.renderers.entities.js" />
     <EmbeddedResource Include="Templates\report.renderers.sections.js" />
     <EmbeddedResource Include="Templates\report.ui.toc.js" />
     <EmbeddedResource Include="Templates\report.ui.integrity.js" />

@@ -200,7 +200,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                     Cell(candidate.TopFrames.Count > 0 ? candidate.TopFrames[0] : "—")));
             }
             compactTables.Add(STCompact("Crash thread candidates",
-                new[] { CH("Managed Thread","number"), CH("OS Thread","number"), CH("Active Exceptions","number"), CH("Primary Exception"), CH("Trace Confidence"), CH("Rethrown"), CH("Trace Source"), CH("Top Frame") },
+                new[] { CH("Managed Thread","number"), CHThread("OS Thread"), CH("Active Exceptions","number"), CH("Primary Exception"), CH("Trace Confidence"), CH("Rethrown"), CH("Trace Source"), CH("Top Frame") },
                 hotspotRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             var originRows = new List<TableRow>(candidateLimit);
@@ -282,7 +282,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
                     Cell(ex.IsRethrown ? "Yes" : "No")));
             }
             compactTables.Add(STCompact("Exception instances",
-                new[] { CHType("Type"), CH("Address"), CH("Message"), CH("HRESULT"), CH("Inner Type"), CH("Chain Depth","number"), CH("Status"), CH("Thread","number"), CH("OS Thread","number"), CH("Rethrown") },
+                new[] { CHType("Type"), CH("Address"), CH("Message"), CH("HRESULT"), CH("Inner Type"), CH("Chain Depth","number"), CH("Status"), CH("Thread","number"), CHThread("OS Thread"), CH("Rethrown") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             var depthBuckets = new Dictionary<int, int>();

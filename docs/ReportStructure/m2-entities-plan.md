@@ -327,7 +327,23 @@ sequencing, what exists today, and decisions before starting.
      identical to before. The `IndexOutOfRangeException` facts now name thread 24088, which is also the thread with the largest retained bytes
      (22.7 MB); its entity row holds exception, crash-candidate, retained-bytes, stack-cluster and state facts. Results: `m2-step1/step6-results.txt`.
    - **Panel:** the thread page now expects an "Exceptions and async" panel and lists it as absent for threads without one.
-7. **Thread dossier** *(pending)* — same layout; first report surface for per-thread retention.
+7. **Thread dossier** *(done 2026-10-07, verified on the reference dump; uncommitted)* — the panel already rendered threads (step 5b); this step makes thread
+   cells reach it.
+   - **Which columns:** the 7 "OS Thread" columns (Thread Analysis 4 tables, Crash Analysis 2, Hang 1) use `CHThread` (header type `entity:thread`).
+     The managed "Thread ID" / "Thread" / "Managed Thread" columns stay plain numbers: the entity table keys threads on the OS id, and none of the managed ids match.
+     On the reference dump 6 of the 7 columns have rows (the Hang table is empty).
+   - **Cells:** the pass turns an OS thread number into the thread's entity id. Section builders hand over thread ids as `double`, not `uint`: a first
+     version only handled integer types, passed its unit tests, and converted nothing on the real dump; caught by the real-dump check, now covered by a test.
+   - **Wire ambiguity avoided:** in an entity column a bare number means "entity id", so a thread number with no entity becomes its digits as text, never a
+     leftover number (the same hazard the string pool avoids).
+   - **Looks and behaviour unchanged:** link text keeps the thousands separators the number cell had ("24,088"), the cell keeps `data-value` so numeric
+     sorting still works, and download-JSON resolves a thread id back to a number. The panel title is now "OS thread 24088".
+   - **Tests:** 3 new in `EntityCellTests` (double and integer cells, unknown/placeholder cells, a thread number never matched against a type entity);
+     suite green (1704 passed, 66 skipped). Panel harness 40 of 40 (5 new: thread link, separator, sort value, text fallback, title).
+   - **Real dump (1m09s):** 6 thread columns, 65 cells: 41 entity cells each pointing at the right thread (name equals the original OS id), 24 text cells
+     (the "—" placeholders in the exception-instances table); **0 mismatches**; entity table and summary identical to the previous run.
+     Sizes: `report.json` 84.61 MB (unchanged), HTML 3.127 MB. Results: `m2-step1/verify-step7-results.txt`.
+   - **Not done:** thread links from outside tables (for example from claims or the header), full stack traces in the page.
 8. **Anchors** *(pending)* — `#entity/type/<name>`, `#entity/thread/<id>`. A broken anchor fails the
    build ([§ 9.5](ReportSystemVision.md#95-citation-and-anchoring)).
 

@@ -73,6 +73,10 @@ internal abstract class SectionBuilderBase
     protected static CompactHeader CHType(string name, bool sortable = true)
         => new(name, EntityColumn.Type, null, sortable);
 
+    // Thread columns link by OS thread id, the id the entity table keys threads on; managed ids stay plain numbers.
+    protected static CompactHeader CHThread(string name, bool sortable = true)
+        => new(name, EntityColumn.Thread, null, sortable);
+
     protected static CompactRow R(params object?[] values) => new(values);
 
     protected static CompactTable STCompact(string title, IReadOnlyList<CompactHeader> headers, IReadOnlyList<CompactRow> rows, int rowLimit = 20)

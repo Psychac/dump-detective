@@ -124,6 +124,55 @@ public sealed class EntityCellTests
             .And.Contain(".entity-panel");
     }
 
+    [Fact]
+    public void Apply_ThreadColumn_TurnsAnOsThreadNumberIntoTheThreadEntityId()
+    {
+        FirstRow(EntityCellPass.Apply(ThreadDocument(24088u, 5L))).Values[0].Should().Be(new EntityCell(2, null));
+        FirstRow(EntityCellPass.Apply(ThreadDocument(24088d, 5L))).Values[0].Should().Be(new EntityCell(2, null), "the section builders hand over doubles");
+        AnalysisReportDocument rewritten = EntityCellPass.Apply(ThreadDocument(24088u, 5L));
+
+        FirstRow(rewritten).Values[1].Should().Be(5L);
+    }
+
+    [Fact]
+    public void Apply_ThreadColumn_LeavesUnknownThreadsAndPlaceholdersAsTheyWere()
+    {
+        FirstRow(EntityCellPass.Apply(ThreadDocument(999d, 5L))).Values[0].Should().Be("999", "a bare number in an entity column would be read as an entity id");
+        FirstRow(EntityCellPass.Apply(ThreadDocument("—", 5L))).Values[0].Should().Be("—");
+        FirstRow(EntityCellPass.Apply(ThreadDocument(null, 5L))).Values[0].Should().BeNull();
+    }
+
+    [Fact]
+    public void Apply_ThreadIdsAreNotMatchedAgainstTypeEntities()
+    {
+        // A type whose name is all digits must not capture a thread cell.
+        EntityRecord[] entities = [new(0, EntityKind.Type, "24088", MatchFidelity.Exact)];
+
+        AnalysisReportDocument rewritten = EntityCellPass.Apply(ThreadDocument(24088u, 5L) with { Entities = entities });
+
+        FirstRow(rewritten).Values[0].Should().Be("24088");
+    }
+
+    private static AnalysisReportDocument ThreadDocument(object? osThread, long count)
+    {
+        var table = new CompactTable(
+            "Top blocked threads",
+            [new CompactHeader("OS Thread", EntityColumn.Thread), new CompactHeader("Count", "number")],
+            [new CompactRow([osThread, count])]);
+        var section = new AnalyzerDetailSection("Thread Analysis", "Thread Analysis", 0, []) { CompactTables = [table] };
+        return new SingleDumpReportDocument
+        {
+            DumpPath = "C:/dumps/Crash.dmp",
+            Domains = [new ReportDomainSection("Threads", null, [section], [])],
+            Entities =
+            [
+                new EntityRecord(0, EntityKind.Type, "System.Data.DataColumn", MatchFidelity.Exact),
+                new EntityRecord(1, EntityKind.Thread, "11132", MatchFidelity.Exact),
+                new EntityRecord(2, EntityKind.Thread, "24088", MatchFidelity.Exact),
+            ],
+        };
+    }
+
     private static CompactRow FirstRow(AnalysisReportDocument document) => document.Domains![0].Sections[0].CompactTables![0].Rows[0];
 
     private static AnalysisReportDocument DocumentWithRows(object?[] firstRow, object?[]? secondRow = null, bool entityColumn = true)

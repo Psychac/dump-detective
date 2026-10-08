@@ -8,9 +8,17 @@ internal static class EntityColumn
 {
     public const string TypePrefix = "entity:";
     public const string Type = TypePrefix + "type";
+    public const string Thread = TypePrefix + "thread";
 
     public static bool IsEntityColumn(CompactHeader header) =>
         header.Type is not null && header.Type.StartsWith(TypePrefix, StringComparison.Ordinal);
+
+    public static EntityKind KindOf(CompactHeader header) => header.Type switch
+    {
+        Type => EntityKind.Type,
+        Thread => EntityKind.Thread,
+        _ => throw new ArgumentException($"Not an entity column: {header.Type}", nameof(header)),
+    };
 }
 
 /// <summary>

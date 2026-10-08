@@ -52,7 +52,10 @@ export function decorateEntityCell(td, entityId, shownName) {
   }
   const link = el('a', 'entity-link');
   link.href = entityHref(entity);
-  link.textContent = shownName;
+  // Thread ids keep the thousands separators the plain number cell had, and keep sorting as numbers.
+  const isNumericId = String(entity.kind) === 'Thread' && /^[0-9]+$/.test(shownName);
+  link.textContent = isNumericId ? Number(shownName).toLocaleString('en-US') : shownName;
+  if (isNumericId) td.dataset.value = shownName;
   link.title = 'Open the page for this ' + String(entity.kind).toLowerCase();
   td.appendChild(link);
 }
@@ -131,7 +134,7 @@ function openEntityPanel(target) {
   const parts = panel._parts;
   const entity = _entityByKey.get(entityKey(target.kind, target.joinKey));
   parts.kind.textContent = target.kind;
-  parts.title.textContent = target.joinKey;
+  parts.title.textContent = target.kind === 'thread' ? 'OS thread ' + target.joinKey : target.joinKey;
   parts.body.textContent = '';
   if (entity) {
     renderEntityBody(parts.body, entity);

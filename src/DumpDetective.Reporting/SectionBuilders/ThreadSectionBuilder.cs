@@ -102,7 +102,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
                     Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
             }
-            compactTables.Add(STCompact("Top blocked threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, bRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top blocked threads", new[] { CH("Thread ID","number"), CHThread("OS Thread"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, bRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopLockedThreads is { Count: > 0 })
@@ -122,7 +122,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
                     Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
             }
-            compactTables.Add(STCompact("Top lock-holding threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, lRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top lock-holding threads", new[] { CH("Thread ID","number"), CHThread("OS Thread"), CH("Lock Count","number"), CH("State"), CH("GC Mode"), CH("Wait Category"), CH("Wait Reason"), CH("Stack Size","bytes"), CH("Top Frame") }, lRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.ThreadStateDistribution is { Count: > 0 })
@@ -164,7 +164,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(snapshot.GcMode),
                     Cell(snapshot.TopFrames.Count > 0 ? snapshot.TopFrames[0] : "—")]));
             }
-            compactTables.Add(STCompact("Threads with active exceptions", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CHType("Exception Type"), CH("Message"), CH("Lock Count","number"), CH("GC Mode"), CH("Top Frame") }, exRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Threads with active exceptions", new[] { CH("Thread ID","number"), CHThread("OS Thread"), CHType("Exception Type"), CH("Message"), CH("Lock Count","number"), CH("GC Mode"), CH("Top Frame") }, exRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var hotspots = d.TopStackHotspots ?? [];
@@ -195,7 +195,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
                     Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
             }
-            compactTables.Add(STCompact("Other threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("State"), CH("GC Mode"), CH("Stack Roots","number"), CH("Stack Size","bytes"), CH("Top Frame") }, otherRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Other threads", new[] { CH("Thread ID","number"), CHThread("OS Thread"), CH("State"), CH("GC Mode"), CH("Stack Roots","number"), CH("Stack Size","bytes"), CH("Top Frame") }, otherRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // A single AppDomain is the norm on .NET 5+ and conveys nothing — only show the

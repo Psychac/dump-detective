@@ -84,7 +84,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
                     Cell(t.LockCount.ToString("N0"), t.LockCount),
                     Cell(t.TopStackFrame ?? "—")));
             }
-            compactTables.Add(STCompact("Top waiting threads", new[] { CH("Thread","number"), CH("OS Thread","number"), CH("Wait Type"), CH("Wait Reason"), CH("Locks","number"), CH("Top Frame") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top waiting threads", new[] { CH("Thread","number"), CHThread("OS Thread"), CH("Wait Type"), CH("Wait Reason"), CH("Locks","number"), CH("Top Frame") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.RuntimeThreadPoolDataAvailable)

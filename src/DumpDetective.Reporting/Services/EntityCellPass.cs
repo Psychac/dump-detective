@@ -1,3 +1,4 @@
+using System.Globalization;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Sdk.Identity;
 
@@ -14,27 +15,31 @@ internal static class EntityCellPass
         if (document.Entities is not { Count: > 0 } entities || document.Domains is null)
             return document;
 
-        Dictionary<string, int> typeIds = TypeIdsByJoinKey(entities);
+        var idsByKind = new Dictionary<EntityKind, Dictionary<string, int>>
+        {
+            [EntityKind.Type] = IdsByJoinKey(entities, EntityKind.Type),
+            [EntityKind.Thread] = IdsByJoinKey(entities, EntityKind.Thread),
+        };
         var domains = new List<ReportDomainSection>(document.Domains.Count);
         foreach (ReportDomainSection domain in document.Domains)
-            domains.Add(domain with { Sections = RewriteSections(domain.Sections, typeIds) });
+            domains.Add(domain with { Sections = RewriteSections(domain.Sections, idsByKind) });
 
         return document with { Domains = domains };
     }
 
-    private static Dictionary<string, int> TypeIdsByJoinKey(IReadOnlyList<EntityRecord> entities)
+    private static Dictionary<string, int> IdsByJoinKey(IReadOnlyList<EntityRecord> entities, EntityKind kind)
     {
-        var typeIds = new Dictionary<string, int>(StringComparer.Ordinal);
+        var ids = new Dictionary<string, int>(StringComparer.Ordinal);
         for (int i = 0; i < entities.Count; i++)
         {
-            if (entities[i].Kind == EntityKind.Type)
-                typeIds[entities[i].JoinKey] = entities[i].Id;
+            if (entities[i].Kind == kind)
+                ids[entities[i].JoinKey] = entities[i].Id;
         }
 
-        return typeIds;
+        return ids;
     }
 
-    private static IReadOnlyList<AnalyzerDetailSection> RewriteSections(IReadOnlyList<AnalyzerDetailSection> sections, Dictionary<string, int> typeIds)
+    private static IReadOnlyList<AnalyzerDetailSection> RewriteSections(IReadOnlyList<AnalyzerDetailSection> sections, Dictionary<EntityKind, Dictionary<string, int>> idsByKind)
     {
         var rewritten = new List<AnalyzerDetailSection>(sections.Count);
         foreach (AnalyzerDetailSection section in sections)
@@ -46,7 +51,7 @@ internal static class EntityCellPass
                     hasEntityColumn |= HasEntityColumn(table);
             }
 
-            rewritten.Add(hasEntityColumn ? section with { CompactTables = RewriteTables(section.CompactTables!, typeIds) } : section);
+            rewritten.Add(hasEntityColumn ? section with { CompactTables = RewriteTables(section.CompactTables!, idsByKind) } : section);
         }
 
         return rewritten;
@@ -63,16 +68,16 @@ internal static class EntityCellPass
         return false;
     }
 
-    private static IReadOnlyList<CompactTable> RewriteTables(IReadOnlyList<CompactTable> tables, Dictionary<string, int> typeIds)
+    private static IReadOnlyList<CompactTable> RewriteTables(IReadOnlyList<CompactTable> tables, Dictionary<EntityKind, Dictionary<string, int>> idsByKind)
     {
         var rewritten = new List<CompactTable>(tables.Count);
         foreach (CompactTable table in tables)
-            rewritten.Add(HasEntityColumn(table) ? table with { Rows = RewriteRows(table, typeIds) } : table);
+            rewritten.Add(HasEntityColumn(table) ? table with { Rows = RewriteRows(table, idsByKind) } : table);
 
         return rewritten;
     }
 
-    private static IReadOnlyList<CompactRow> RewriteRows(CompactTable table, Dictionary<string, int> typeIds)
+    private static IReadOnlyList<CompactRow> RewriteRows(CompactTable table, Dictionary<EntityKind, Dictionary<string, int>> idsByKind)
     {
         var entityColumns = new List<int>();
         for (int column = 0; column < table.Headers.Count; column++)
@@ -87,8 +92,13 @@ internal static class EntityCellPass
             object?[] cells = (object?[])row.Values.Clone();
             foreach (int column in entityColumns)
             {
-                if (column < cells.Length && cells[column] is string shownName)
-                    cells[column] = ToEntityCell(shownName, typeIds) ?? (object)shownName;
+                if (column >= cells.Length || cells[column] is null)
+                    continue;
+
+                EntityKind kind = EntityColumn.KindOf(table.Headers[column]);
+                cells[column] = kind == EntityKind.Thread
+                    ? ThreadCell(cells[column]!, idsByKind[EntityKind.Thread])
+                    : cells[column] is string shownName ? (object?)ToTypeCell(shownName, idsByKind[EntityKind.Type]) ?? shownName : cells[column];
             }
 
             rows.Add(new CompactRow(cells));
@@ -97,7 +107,25 @@ internal static class EntityCellPass
         return rows;
     }
 
-    private static EntityCell? ToEntityCell(string shownName, Dictionary<string, int> typeIds)
+    // Thread ids are numbers in the table (builders hand over a double) and the entity's join key is the OS id as plain digits.
+    // A thread with no entity becomes its digits as text: in an entity column a bare number means "entity id", so a leftover
+    // number would be read as the wrong entity.
+    private static object ThreadCell(object cell, Dictionary<string, int> threadIds)
+    {
+        string? joinKey = cell switch
+        {
+            uint or int or long or ulong or ushort => Convert.ToString(cell, CultureInfo.InvariantCulture),
+            double number when number >= 0 && number == Math.Floor(number) => ((ulong)number).ToString(CultureInfo.InvariantCulture),
+            string text => text,
+            _ => null,
+        };
+        if (joinKey is null)
+            return cell;
+
+        return threadIds.TryGetValue(joinKey, out int id) ? new EntityCell(id, null) : joinKey;
+    }
+
+    private static EntityCell? ToTypeCell(string shownName, Dictionary<string, int> typeIds)
     {
         string entityName = EntityCanonicalizer.CanonicalizeTypeName(shownName).CanonicalName;
         if (!typeIds.TryGetValue(entityName, out int id))

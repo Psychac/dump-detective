@@ -21,7 +21,8 @@ function resolveStringPoolForDownload(payload) {
   }
   function resolveEntityId(v) {
     if (typeof v !== 'number' || !entities) return v;
-    return entities[v] ? entities[v].joinKey : v;
+    if (!entities[v]) return v;
+    return entities[v].kind === 'Thread' ? Number(entities[v].joinKey) : entities[v].joinKey;
   }
   function resolveSections(sections) {
     if (!Array.isArray(sections)) return;

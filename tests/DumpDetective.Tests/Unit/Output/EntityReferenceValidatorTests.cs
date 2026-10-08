@@ -87,6 +87,46 @@ public sealed class EntityReferenceValidatorTests
             .Should().Contain(p => p.Contains("bare Int64"));
     }
 
+    [Fact]
+    public void Validate_TwoEntitiesSharingAnAddress_IsReported()
+    {
+        AnalysisReportDocument document = Document("System.Core.dll", 24088d, GoodSummary()) with
+        {
+            Entities =
+            [
+                new EntityRecord(0, EntityKind.Module, "System.Core.dll", MatchFidelity.Exact),
+                new EntityRecord(1, EntityKind.Module, "System.Core.dll", MatchFidelity.Exact),
+                new EntityRecord(2, EntityKind.Type, "System.Core.dll", MatchFidelity.Exact),
+            ],
+        };
+
+        IReadOnlyList<string> problems = EntityReferenceValidator.Validate(document);
+
+        problems.Should().ContainSingle(p => p.Contains("Entities 0 and 1") && p.Contains("#entity/module/System.Core.dll"));
+    }
+
+    [Fact]
+    public void Validate_EntityWithNoNameAndNoCellLinkingIt_IsNotAProblem()
+    {
+        AnalysisReportDocument document = Document("System.Data.DataColumn", 24088d, GoodSummary()) with
+        {
+            Entities = [.. Entities, new EntityRecord(2, EntityKind.Module, "", MatchFidelity.Exact)],
+        };
+
+        EntityReferenceValidator.Validate(document).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Validate_CellLinkingAnEntityWithNoName_IsReported()
+    {
+        AnalysisReportDocument document = Document(new EntityCell(0, null), 24088d, GoodSummary()) with
+        {
+            Entities = [new EntityRecord(0, EntityKind.Type, "", MatchFidelity.Exact), Entities[1]],
+        };
+
+        EntityReferenceValidator.Validate(document).Should().Contain(p => p.Contains("no name to address") && p.Contains("row 0"));
+    }
+
     private static EntitySummary GoodSummary() => new(
         [new FactKindRecord("leak.candidate-type", "Leak Candidate Analysis", "Size and population")],
         [new MeasureRecord("instance.count", "Count")],

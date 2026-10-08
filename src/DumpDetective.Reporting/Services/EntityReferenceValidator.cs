@@ -17,6 +17,7 @@ internal static class EntityReferenceValidator
             return problems;
 
         CheckEntityIds(entities, problems);
+        CheckEntityAddresses(entities, problems);
         if (document.EntitySummary is { } summary)
             CheckSummary(summary, entities, document.Findings, problems);
         CheckTableCells(EntityCellPass.Apply(document), entities, problems);
@@ -29,6 +30,24 @@ internal static class EntityReferenceValidator
         {
             if (entities[i].Id != i)
                 problems.Add($"Entity table row {i} has id {entities[i].Id}; ids must equal the row index.");
+        }
+    }
+
+    // The page address is #entity/<kind>/<joinKey>, so two entities sharing one would open each other's page, and an empty
+    // key cannot be addressed at all (the client's address pattern needs at least one character after the kind).
+    private static void CheckEntityAddresses(IReadOnlyList<EntityRecord> entities, List<string> problems)
+    {
+        var firstIdByAddress = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (EntityRecord entity in entities)
+        {
+            if (entity.JoinKey.Length == 0)
+                continue;
+
+            string address = Address(entity);
+            if (firstIdByAddress.TryGetValue(address, out int firstId))
+                problems.Add($"Entities {firstId} and {entity.Id} share the address '{address}'; opening it would show only one of them.");
+            else
+                firstIdByAddress[address] = entity.Id;
         }
     }
 
@@ -107,6 +126,9 @@ internal static class EntityReferenceValidator
                     case EntityCell reference when reference.Id < 0 || reference.Id >= entities.Count:
                         problems.Add($"{where}: points at entity {reference.Id}, which is not in the entity table ({entities.Count} rows).");
                         break;
+                    case EntityCell reference when entities[reference.Id].JoinKey.Length == 0:
+                        problems.Add($"{where}: links to {Describe(entities[reference.Id])}, which has no name to address; the cell should stay text.");
+                        break;
                     case EntityCell reference when entities[reference.Id].Kind != expected:
                         problems.Add($"{where}: points at {Describe(entities[reference.Id])}, but the column holds {expected} entities.");
                         break;
@@ -121,6 +143,8 @@ internal static class EntityReferenceValidator
             }
         }
     }
+
+    private static string Address(EntityRecord entity) => $"#entity/{entity.Kind.ToString().ToLowerInvariant()}/{entity.JoinKey}";
 
     private static string Describe(EntityRecord entity) => $"{entity.Kind} '{entity.JoinKey}' (id {entity.Id})";
 }

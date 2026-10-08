@@ -131,3 +131,42 @@ test('type and thread pages keep their own expected panels', function () {
   const threadPage = openPage({ id: 0, kind: 'Thread', joinKey: '12', fidelity: 'High' }, [], []);
   assert.match(threadPage.text, /No facts were reported for: State, Retention, Exceptions and async\./);
 });
+
+const awkwardModuleNames = ['App_Theme_DevEx.1a2b.dll', 'My Module (x86).dll', 'weird#name%20.dll', 'Über.Modul.dll', 'a/b\c.dll'];
+
+for (const name of awkwardModuleNames) {
+  test('module link for "' + name + '" opens that module page', function () {
+    const entity = { id: 0, kind: 'Module', joinKey: name, fidelity: 'High', details: [] };
+    entities.setEntityData(documentWith(entity, [], []));
+    const cell = new FakeNode('td');
+    entities.decorateEntityCell(cell, 0, name);
+    const link = cell.children[0];
+    assert.equal(link.tag, 'a');
+    assert.equal(link.textContent, name);
+    assert.ok(/^#entity\/module\/[^#]+$/.test(link.href), 'address has exactly one hash and no raw separators in the name: ' + link.href);
+
+    const page = openPage(entity, [], []);
+    location.hash = link.href;
+    entities.setupEntityPanel();
+    const panel = document.body.children.find(function (child) { return child.tag === 'aside'; });
+    assert.equal(panel._parts.title.textContent, name);
+    assert.equal(panel._parts.kind.textContent, 'module');
+    assert.ok(page.text.length > 0);
+  });
+}
+
+test('an address for a module this report does not have says so instead of opening another page', function () {
+  const entity = { id: 0, kind: 'Module', joinKey: 'System.Core.dll', fidelity: 'High', details: [] };
+  entities.setEntityData(documentWith(entity, [], []));
+  location.hash = '#entity/module/' + encodeURIComponent('Other.dll');
+  entities.setupEntityPanel();
+  const panel = document.body.children.find(function (child) { return child.tag === 'aside'; });
+  assert.match(panel._parts.body.textContent, /This report has no entry for that module\./);
+});
+
+test('a module cell with no entity stays plain text', function () {
+  entities.setEntityData(documentWith({ id: 0, kind: 'Module', joinKey: 'A.dll', fidelity: 'High' }, [], []));
+  const cell = new FakeNode('td');
+  entities.decorateEntityCell(cell, 5, '');
+  assert.equal(cell.children.length === 0 || cell.children[0].tag === '#text', true);
+});

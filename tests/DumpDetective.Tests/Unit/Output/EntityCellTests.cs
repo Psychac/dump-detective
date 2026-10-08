@@ -176,6 +176,14 @@ public sealed class EntityCellTests
     }
 
     [Fact]
+    public void Apply_ModuleColumn_EmptyCellStaysTextEvenWhenAnUnnamedModuleEntityExists()
+    {
+        EntityRecord[] entities = [.. ModuleDocument("").Entities!, new EntityRecord(4, EntityKind.Module, "", MatchFidelity.Exact)];
+
+        FirstRow(EntityCellPass.Apply(ModuleDocument("") with { Entities = entities })).Values[0].Should().Be("");
+    }
+
+    [Fact]
     public void Apply_ModuleColumn_DoesNotMatchATypeOrAThreadWithTheSameText()
     {
         EntityRecord[] entities = [new(0, EntityKind.Type, "mscorlib.dll", MatchFidelity.Exact), new(1, EntityKind.Thread, "mscorlib.dll", MatchFidelity.Exact)];

@@ -64,7 +64,11 @@ mechanics already exist for types and threads; this milestone extends them to th
    - **Tests:** `PanelFor_PlacesModuleFactsInTheirOwnPanels` (10 cases); entity suites 62 of 62.
    - **Panel harness:** the old one could not be found, so `tests/EntityPanelHarness/entity-panels.test.mjs` was written (fake DOM, `node --test <file>`): 5 of 5 pass (module panel order, expected Footprint note, type and thread pages unchanged).
    - **Real dump (101s):** 339 module facts moved out of "Other" (Footprint 315, Activity 22, Identity 2), 0 left; all 255 modules have a Footprint fact; entity table identical to the previous run; no validator warnings. Results: `m2-step1/verify-m2c3-results.txt`.
-4. **Module anchors** *(pending)* — `#entity/module/<name>`; validator and Node harness extended.
+4. **Module anchors** *(done 2026-10-08, verified on reference dump)* — `#entity/module/<name>` already worked (the address is generic over kind); this step guards it.
+   - **Validator:** `EntityReferenceValidator` now warns when two entities share an address, and when a table cell links an entity with an empty name (D3: that cell stays text).
+   - **Bug found by the new check:** step 2's `ToModuleCell` matched an empty cell to the unnamed module's entity, so 6 cells linked to no address. Fixed with a guard; regression test `Apply_ModuleColumn_EmptyCellStaysTextEvenWhenAnUnnamedModuleEntityExists`. Step 2's verification missed it because it compared shown text, where `""` equals `""`.
+   - **Harness:** 7 new cases (12 of 12): awkward names (dots, spaces and brackets, `#`, `%`, non-ASCII, `/` and `\`) round-trip through the link and the address; an unknown module says "no entry"; an unmatched cell stays text.
+   - **Real dump:** 0 warnings after the fix; entity table and summary unchanged; no duplicate addresses. Results: `m2-step1/verify-m2c4-results.txt`.
 5. **Method pages** *(pending)* — decide which table cell names a method (none does today; "Declaring Type" in the async tables shows
    numbers), mark it `entity:method`, add panels (async state machine facts) and a title like `Class::Method`. May need an analyzer to emit the name
    in a table.

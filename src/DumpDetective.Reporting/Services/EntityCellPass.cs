@@ -133,6 +133,10 @@ internal static class EntityCellPass
     // file name at its end and keeps the path as the exact text. A cell cut short for display ("...") matches nothing and stays text.
     private static EntityCell? ToModuleCell(string shown, Dictionary<string, int> moduleIds)
     {
+        // The unnamed module is an entity with an empty file name, so an empty cell would otherwise match it and link to no address (D3).
+        if (shown.Length == 0)
+            return null;
+
         if (moduleIds.TryGetValue(shown, out int id))
             return new EntityCell(id, null);
 

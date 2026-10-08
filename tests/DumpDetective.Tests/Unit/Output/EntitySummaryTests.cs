@@ -58,6 +58,20 @@ public sealed class EntitySummaryTests : IDisposable
             ("finalizer.queue-entry", 2), ("leak.candidate-type", 1));
     }
 
+    [Theory]
+    [InlineData("runtime.module-disk-footprint", "Footprint")]
+    [InlineData("runtime.module-heap-footprint", "Footprint")]
+    [InlineData("runtime.module-type-density", "Footprint")]
+    [InlineData("runtime.jit-module-frames", "Activity")]
+    [InlineData("infra.http-handler-module", "Identity")]
+    [InlineData("runtime.module-unknown-identity", "Identity")]
+    [InlineData("runtime.module-conflict-group", "Identity")]
+    [InlineData("runtime.module-cross-domain-load", "Identity")]
+    [InlineData("runtime.module-assemblyref-mismatch", "Identity")]
+    [InlineData("runtime.no-such-fact", "Other")]
+    public void PanelFor_PlacesModuleFactsInTheirOwnPanels(string factKind, string expectedPanel) =>
+        EntityFactPanels.PanelFor(factKind).Should().Be(expectedPanel);
+
     [Fact]
     public void Build_SingleFact_GivesItsValueAsSumMinAndMax()
     {

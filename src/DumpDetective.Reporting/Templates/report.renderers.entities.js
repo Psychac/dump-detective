@@ -6,7 +6,8 @@ import { findingAnchorId } from './report.renderers.shared.js';
 
 const ENTITY_TYPE_PANELS = ['Size and population', 'Generations and heaps', 'Retention', 'Lifecycle', 'Shape and cost', 'Exceptions and async'];
 const ENTITY_THREAD_PANELS = ['State', 'Retention', 'Exceptions and async'];
-const ENTITY_PANEL_ORDER = ENTITY_TYPE_PANELS.concat(['State', 'Other']);
+const ENTITY_MODULE_PANELS = ['Footprint', 'Activity', 'Identity'];
+const ENTITY_PANEL_ORDER = ENTITY_TYPE_PANELS.concat(['State'], ENTITY_MODULE_PANELS, ['Other']);
 
 let _entityTable = null;
 let _entitySummary = null;
@@ -170,11 +171,19 @@ function renderEntityBody(body, entity) {
   }
   body.appendChild(entityRelations());
 
-  const expected = String(entity.kind).toLowerCase() === 'type' ? ENTITY_TYPE_PANELS
-    : String(entity.kind).toLowerCase() === 'thread' ? ENTITY_THREAD_PANELS : [];
+  const expected = expectedEntityPanels(entity.kind);
   const absent = expected.filter(function (name) { return !byPanel.has(name); });
   if (absent.length) body.appendChild(entityNote('No facts were reported for: ' + absent.join(', ') + '.'));
   body.appendChild(entityNote('Counts and totals are per kind of fact. The individual facts are in the observations file written beside this report.'));
+}
+
+function expectedEntityPanels(kind) {
+  switch (String(kind).toLowerCase()) {
+    case 'type': return ENTITY_TYPE_PANELS;
+    case 'thread': return ENTITY_THREAD_PANELS;
+    case 'module': return ['Footprint'];
+    default: return [];
+  }
 }
 
 function entityGroupsByPanel(groups) {

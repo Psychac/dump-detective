@@ -58,8 +58,12 @@ mechanics already exist for types and threads; this milestone extends them to th
      names became ids), HTML 3.135 MB; no validator warnings. Results: `m2-step1/verify-m2c2-results.txt`.
    - **Test-suite environment problem (resolved):** with C: full (0 bytes free) three temp-writing tests failed (`HeapIndexScanDispatcherTests`,
      `CacheContainerWriterChecksumProgressTests`, `RetainedSizeCandidateSelectorTests`), identically with this change stashed. After freeing space they pass (31 of 31).
-3. **Module panels** *(pending)* — Footprint (disk, heap), Activity (JIT frames), Identity (HTTP handler, unknown identity) in
-   `EntityFactPanels`; thread-style expected-panel list in the client; an identity note that lists shared-name paths.
+3. **Module panels** *(done 2026-10-08, verified on reference dump)*
+   - **Panels:** Footprint (disk, heap, type density), Activity (JIT module frames), Identity (HTTP handler, unknown identity, shared name, cross-domain load, assembly-reference mismatch) in `EntityFactPanels`.
+   - **Client:** `ENTITY_MODULE_PANELS` added to the panel order; a module page expects Footprint (every module has a disk footprint fact).
+   - **Tests:** `PanelFor_PlacesModuleFactsInTheirOwnPanels` (10 cases); entity suites 62 of 62.
+   - **Panel harness:** the old one could not be found, so `tests/EntityPanelHarness/entity-panels.test.mjs` was written (fake DOM, `node --test <file>`): 5 of 5 pass (module panel order, expected Footprint note, type and thread pages unchanged).
+   - **Real dump (101s):** 339 module facts moved out of "Other" (Footprint 315, Activity 22, Identity 2), 0 left; all 255 modules have a Footprint fact; entity table identical to the previous run; no validator warnings. Results: `m2-step1/verify-m2c3-results.txt`.
 4. **Module anchors** *(pending)* — `#entity/module/<name>`; validator and Node harness extended.
 5. **Method pages** *(pending)* — decide which table cell names a method (none does today; "Declaring Type" in the async tables shows
    numbers), mark it `entity:method`, add panels (async state machine facts) and a title like `Class::Method`. May need an analyzer to emit the name

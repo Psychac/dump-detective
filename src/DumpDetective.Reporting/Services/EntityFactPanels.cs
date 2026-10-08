@@ -14,6 +14,9 @@ internal static class EntityFactPanels
     public const string ShapeAndCost = "Shape and cost";
     public const string ExceptionsAndAsync = "Exceptions and async";
     public const string State = "State";
+    public const string Footprint = "Footprint";
+    public const string Activity = "Activity";
+    public const string Identity = "Identity";
     public const string Other = "Other";
 
     private static readonly Dictionary<string, string> PanelByFactKind = new(StringComparer.Ordinal)
@@ -72,6 +75,16 @@ internal static class EntityFactPanels
         ["thread.state"] = State,
         ["runtime.finalizer-thread"] = State,
         ["thread.stack-cluster-member"] = State,
+
+        ["runtime.module-disk-footprint"] = Footprint,
+        ["runtime.module-heap-footprint"] = Footprint,
+        ["runtime.module-type-density"] = Footprint,
+        ["runtime.jit-module-frames"] = Activity,
+        ["infra.http-handler-module"] = Identity,
+        ["runtime.module-unknown-identity"] = Identity,
+        ["runtime.module-conflict-group"] = Identity,
+        ["runtime.module-cross-domain-load"] = Identity,
+        ["runtime.module-assemblyref-mismatch"] = Identity,
     };
 
     // An allow-list, so a measure nobody has reviewed can never be summed wrongly: counts and shallow-style byte totals add up

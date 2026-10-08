@@ -127,6 +127,18 @@ public sealed class EntityReferenceValidatorTests
         EntityReferenceValidator.Validate(document).Should().Contain(p => p.Contains("no name to address") && p.Contains("row 0"));
     }
 
+    [Fact]
+    public void Validate_MethodColumnWithoutADeclaringTypeColumn_IsReported()
+    {
+        AnalysisReportDocument document = Document("System.Data.DataColumn", 24088d, GoodSummary());
+        CompactTable table = new("Methods", [new CompactHeader("Method Name", EntityColumn.Method)], [new CompactRow(["OnTick"])]);
+        AnalyzerDetailSection section = document.Domains![0].Sections[0] with { CompactTables = [table] };
+
+        IReadOnlyList<string> problems = EntityReferenceValidator.Validate(document with { Domains = [document.Domains[0] with { Sections = [section] }] });
+
+        problems.Should().ContainSingle(p => p.Contains("'Method Name'") && p.Contains("Declaring Type"));
+    }
+
     private static EntitySummary GoodSummary() => new(
         [new FactKindRecord("leak.candidate-type", "Leak Candidate Analysis", "Size and population")],
         [new MeasureRecord("instance.count", "Count")],

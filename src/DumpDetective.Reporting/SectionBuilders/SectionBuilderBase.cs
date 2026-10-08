@@ -77,6 +77,10 @@ internal abstract class SectionBuilderBase
     protected static CompactHeader CHModule(string name, bool sortable = true)
         => new(name, EntityColumn.Module, null, sortable);
 
+    // Method columns show the bare method name; the pass finds the declaring type in the row's "Declaring Type" type column.
+    protected static CompactHeader CHMethod(string name, bool sortable = true)
+        => new(name, EntityColumn.Method, null, sortable);
+
     // Thread columns link by OS thread id, the id the entity table keys threads on; managed ids stay plain numbers.
     protected static CompactHeader CHThread(string name, bool sortable = true)
         => new(name, EntityColumn.Thread, null, sortable);

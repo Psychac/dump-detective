@@ -109,12 +109,26 @@ internal static class EntityReferenceValidator
         }
     }
 
+    private static bool HasDeclaringTypeColumn(CompactTable table)
+    {
+        foreach (CompactHeader header in table.Headers)
+        {
+            if (header.Type == EntityColumn.Type && header.Name == EntityColumn.MethodDeclaringTypeHeader)
+                return true;
+        }
+
+        return false;
+    }
+
     private static void CheckTable(string analyzer, CompactTable table, IReadOnlyList<EntityRecord> entities, List<string> problems)
     {
         for (int column = 0; column < table.Headers.Count; column++)
         {
             if (!EntityColumn.IsEntityColumn(table.Headers[column]))
                 continue;
+
+            if (table.Headers[column].Type == EntityColumn.Method && !HasDeclaringTypeColumn(table))
+                problems.Add($"{analyzer} / '{table.Title}' / column '{table.Headers[column].Name}': a method column needs a '{EntityColumn.MethodDeclaringTypeHeader}' type column to read the declaring type from.");
 
             EntityKind expected = EntityColumn.KindOf(table.Headers[column]);
             for (int row = 0; row < table.Rows.Count; row++)

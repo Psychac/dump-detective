@@ -36,7 +36,7 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
                           "High counts for the same method indicate fire-and-forget patterns or unbounded parallelism."));
             compactTables.Add(STCompact(
                 "Top async state machine types by instance count",
-                new[] { CH("Type Name"), CH("Originating Method"), CHType("Declaring Type"), CH("Count","number"), CH("Total Size","bytes"), CH("Dominant State"), CH("State Distribution"), CH("Ref Fields","number"), CH("Gen2 Count","number"), CH("Gen2 %","percent"), CH("Async Void") },
+                new[] { CH("Type Name"), CHMethod("Originating Method"), CHType("Declaring Type"), CH("Count","number"), CH("Total Size","bytes"), CH("Dominant State"), CH("State Distribution"), CH("Ref Fields","number"), CH("Gen2 Count","number"), CH("Gen2 %","percent"), CH("Async Void") },
                 BuildTypeRows(d.TopStateMachineTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             blocks.Add(T("State values indicate the suspend position in the async method: " +
@@ -61,7 +61,7 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
                           "High counts for a single method typically indicate fire-and-forget usage or long-running awaits."));
             compactTables.Add(STCompact(
                 "Suspended async methods by instance count",
-                new[] { CHType("Declaring Type"), CH("Method Name"), CH("Suspended Count","number"), CH("Total Size","bytes") },
+                new[] { CHType("Declaring Type"), CHMethod("Method Name"), CH("Suspended Count","number"), CH("Total Size","bytes") },
                 BuildSuspendedRows(d.SuspendedMethodMap).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -79,8 +79,8 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             StateMachineTypeProfile t = types[i];
             rows.Add(new TableRow([
                 Cell(FormatHelper.TruncateString(t.TypeName, 70)),
-                Cell(FormatHelper.TruncateString(t.OriginatingMethod, 40)),
-                Cell(FormatHelper.TruncateString(t.DeclaringType, 50)),
+                Cell(t.OriginatingMethod),
+                Cell(t.DeclaringType),
                 Cell($"{t.Count:N0}",                       t.Count),
                 Cell(FormatHelper.FormatBytes(t.TotalBytes)),
                 Cell(t.DominantState.ToString()),
@@ -126,8 +126,8 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
         {
             SuspendedMethodEntry e = entries[i];
             rows.Add(new TableRow([
-                Cell(FormatHelper.TruncateString(e.DeclaringType, 60)),
-                Cell(FormatHelper.TruncateString(e.MethodName, 50)),
+                Cell(e.DeclaringType),
+                Cell(e.MethodName),
                 Cell($"{e.SuspendedCount:N0}", e.SuspendedCount),
                 Cell(FormatHelper.FormatBytes(e.TotalBytes)),
             ]));

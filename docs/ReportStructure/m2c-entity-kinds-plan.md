@@ -69,9 +69,13 @@ mechanics already exist for types and threads; this milestone extends them to th
    - **Bug found by the new check:** step 2's `ToModuleCell` matched an empty cell to the unnamed module's entity, so 6 cells linked to no address. Fixed with a guard; regression test `Apply_ModuleColumn_EmptyCellStaysTextEvenWhenAnUnnamedModuleEntityExists`. Step 2's verification missed it because it compared shown text, where `""` equals `""`.
    - **Harness:** 7 new cases (12 of 12): awkward names (dots, spaces and brackets, `#`, `%`, non-ASCII, `/` and `\`) round-trip through the link and the address; an unknown module says "no entry"; an unmatched cell stays text.
    - **Real dump:** 0 warnings after the fix; entity table and summary unchanged; no duplicate addresses. Results: `m2-step1/verify-m2c4-results.txt`.
-5. **Method pages** *(pending)* — decide which table cell names a method (none does today; "Declaring Type" in the async tables shows
-   numbers), mark it `entity:method`, add panels (async state machine facts) and a title like `Class::Method`. May need an analyzer to emit the name
-   in a table.
+5. **Method pages** *(done 2026-10-08, verified on reference dump)* — full version, decided 2026-10-08.
+   - **Measured first:** only the two Async State Machine tables name a method ("Originating Method", "Method Name"); JIT tables stay text (no `MethodRef` is emitted there). 7 method entities, one fact each, no claims.
+   - **Column:** `EntityColumn.Method`. The cell shows the bare method name (`[id, "OnTick"]`), but the entity key is `<declaring type>::<name>`, so the pass reads the declaring type from the same row's entity:type column headed "Declaring Type" (a validator warning fires when it is missing).
+   - **Source fix:** the two async tables no longer truncate Declaring Type and method names; truncation ("...") had made 2-3 of 7 rows unmatchable.
+   - **Page:** title is the key (`Class::Method`); a method page expects the "Exceptions and async" panel.
+   - **Tests:** 4 `EntityCellTests` (same-row match, same name on another type, unknown/cut-off/empty stay text, no declaring-type column), 1 validator test; harness 15 of 15 (3 new).
+   - **Real dump:** 7 of 7 method cells linked in both tables, method text unchanged, entity table and summary identical, 0 warnings. Declaring Type links 5 of 7: the other 2 types have no type entity. Results: `m2-step1/verify-m2c5-results.txt`.
 6. **Object pages** *(pending)* — an object's key embeds the full dump path (`<dump path>:0x...`) while tables show the bare address, so the pass
    must build the key from the address; only 55 of the addresses shown in ~20 tables are entities, the rest stay text. Panels from the SQL
    transaction facts; title shows the address, not the dump path.

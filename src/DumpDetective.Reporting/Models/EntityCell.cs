@@ -10,6 +10,11 @@ internal static class EntityColumn
     public const string Type = TypePrefix + "type";
     public const string Thread = TypePrefix + "thread";
     public const string Module = TypePrefix + "module";
+    public const string Method = TypePrefix + "method";
+
+    // A method is keyed "<declaring type>::<name>" but its column shows only the name, so the declaring type comes from another
+    // column of the same row: the entity:type column with this header.
+    public const string MethodDeclaringTypeHeader = "Declaring Type";
 
     public static bool IsEntityColumn(CompactHeader header) =>
         header.Type is not null && header.Type.StartsWith(TypePrefix, StringComparison.Ordinal);
@@ -19,6 +24,7 @@ internal static class EntityColumn
         Type => EntityKind.Type,
         Thread => EntityKind.Thread,
         Module => EntityKind.Module,
+        Method => EntityKind.Method,
         _ => throw new ArgumentException($"Not an entity column: {header.Type}", nameof(header)),
     };
 }

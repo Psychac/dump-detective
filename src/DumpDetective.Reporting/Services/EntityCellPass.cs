@@ -20,6 +20,7 @@ internal static class EntityCellPass
             [EntityKind.Type] = IdsByJoinKey(entities, EntityKind.Type),
             [EntityKind.Thread] = IdsByJoinKey(entities, EntityKind.Thread),
             [EntityKind.Module] = IdsByJoinKey(entities, EntityKind.Module),
+            [EntityKind.Method] = IdsByJoinKey(entities, EntityKind.Method),
         };
         var domains = new List<ReportDomainSection>(document.Domains.Count);
         foreach (ReportDomainSection domain in document.Domains)
@@ -87,6 +88,7 @@ internal static class EntityCellPass
                 entityColumns.Add(column);
         }
 
+        int declaringTypeColumn = DeclaringTypeColumn(table);
         var rows = new List<CompactRow>(table.Rows.Count);
         foreach (CompactRow row in table.Rows)
         {
@@ -100,6 +102,7 @@ internal static class EntityCellPass
                 cells[column] = kind switch
                 {
                     EntityKind.Thread => ThreadCell(cells[column]!, idsByKind[EntityKind.Thread]),
+                    EntityKind.Method => ToMethodCell(row.Values, column, declaringTypeColumn, idsByKind[EntityKind.Method]),
                     EntityKind.Module => cells[column] is string moduleText ? (object?)ToModuleCell(moduleText, idsByKind[EntityKind.Module]) ?? moduleText : cells[column],
                     _ => cells[column] is string shownName ? (object?)ToTypeCell(shownName, idsByKind[EntityKind.Type]) ?? shownName : cells[column],
                 };
@@ -109,6 +112,32 @@ internal static class EntityCellPass
         }
 
         return rows;
+    }
+
+    private static int DeclaringTypeColumn(CompactTable table)
+    {
+        for (int column = 0; column < table.Headers.Count; column++)
+        {
+            CompactHeader header = table.Headers[column];
+            if (header.Type == EntityColumn.Type && header.Name == EntityColumn.MethodDeclaringTypeHeader)
+                return column;
+        }
+
+        return -1;
+    }
+
+    // Reads the declaring type from the row as the table showed it, before that column is itself rewritten. The cell keeps the name
+    // it showed (the method's own name), because the entity's key is the longer "<type>::<name>".
+    private static object? ToMethodCell(object?[] shownRow, int methodColumn, int declaringTypeColumn, Dictionary<string, int> methodIds)
+    {
+        object? shownMethod = shownRow[methodColumn];
+        if (shownMethod is not string { Length: > 0 } methodName || declaringTypeColumn < 0 || declaringTypeColumn >= shownRow.Length)
+            return shownMethod;
+
+        if (shownRow[declaringTypeColumn] is not string { Length: > 0 } declaringType)
+            return shownMethod;
+
+        return methodIds.TryGetValue($"{declaringType}::{methodName}", out int id) ? new EntityCell(id, methodName) : methodName;
     }
 
     // Thread ids are numbers in the table (builders hand over a double) and the entity's join key is the OS id as plain digits.

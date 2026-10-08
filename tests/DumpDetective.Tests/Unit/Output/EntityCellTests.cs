@@ -191,6 +191,63 @@ public sealed class EntityCellTests
         FirstRow(EntityCellPass.Apply(ModuleDocument("mscorlib.dll") with { Entities = entities })).Values[0].Should().Be("mscorlib.dll");
     }
 
+    [Fact]
+    public void Apply_MethodColumn_MatchesOnTheDeclaringTypeInTheSameRow_AndKeepsTheShownMethodName()
+    {
+        AnalysisReportDocument rewritten = EntityCellPass.Apply(MethodDocument("Serilog.PortableTimer", "OnTick"));
+
+        object?[] row = FirstRow(rewritten).Values;
+        row[0].Should().Be(new EntityCell(2, "OnTick"));
+        row[1].Should().Be(new EntityCell(0, null));
+    }
+
+    [Fact]
+    public void Apply_MethodColumn_SameNameOnAnotherType_MatchesThatTypesMethod()
+    {
+        FirstRow(EntityCellPass.Apply(MethodDocument("Serilog.PeriodicBatchingSink", "OnTick"))).Values[0].Should().Be(new EntityCell(3, "OnTick"));
+    }
+
+    [Fact]
+    public void Apply_MethodColumn_LeavesUnknownMissingAndCutOffCellsAsText()
+    {
+        FirstRow(EntityCellPass.Apply(MethodDocument("Serilog.PortableTimer", "Elsewhere"))).Values[0].Should().Be("Elsewhere");
+        FirstRow(EntityCellPass.Apply(MethodDocument("Serilog.Periodic...", "OnTick"))).Values[0].Should().Be("OnTick");
+        FirstRow(EntityCellPass.Apply(MethodDocument("", "OnTick"))).Values[0].Should().Be("OnTick");
+        FirstRow(EntityCellPass.Apply(MethodDocument("Serilog.PortableTimer", ""))).Values[0].Should().Be("");
+    }
+
+    [Fact]
+    public void Apply_MethodColumn_WithoutADeclaringTypeColumn_StaysText()
+    {
+        AnalysisReportDocument document = MethodDocument("Serilog.PortableTimer", "OnTick");
+        CompactTable table = document.Domains![0].Sections[0].CompactTables![0];
+        CompactTable onlyMethod = table with { Headers = [table.Headers[0]], Rows = [new CompactRow(["OnTick"])] };
+        AnalyzerDetailSection section = document.Domains[0].Sections[0] with { CompactTables = [onlyMethod] };
+
+        FirstRow(EntityCellPass.Apply(document with { Domains = [document.Domains[0] with { Sections = [section] }] })).Values[0].Should().Be("OnTick");
+    }
+
+    private static AnalysisReportDocument MethodDocument(string declaringTypeShown, string methodShown)
+    {
+        var table = new CompactTable(
+            "Suspended async methods",
+            [new CompactHeader("Method Name", EntityColumn.Method), new CompactHeader("Declaring Type", EntityColumn.Type)],
+            [new CompactRow([methodShown, declaringTypeShown])]);
+        var section = new AnalyzerDetailSection("Async State Machine Analysis", "Async", 0, []) { CompactTables = [table] };
+        return new SingleDumpReportDocument
+        {
+            DumpPath = "C:/dumps/Crash.dmp",
+            Domains = [new ReportDomainSection("Async", null, [section], [])],
+            Entities =
+            [
+                new EntityRecord(0, EntityKind.Type, "Serilog.PortableTimer", MatchFidelity.Exact),
+                new EntityRecord(1, EntityKind.Type, "Serilog.PeriodicBatchingSink", MatchFidelity.Exact),
+                new EntityRecord(2, EntityKind.Method, "Serilog.PortableTimer::OnTick", MatchFidelity.Low),
+                new EntityRecord(3, EntityKind.Method, "Serilog.PeriodicBatchingSink::OnTick", MatchFidelity.Low),
+            ],
+        };
+    }
+
     private static AnalysisReportDocument ModuleDocument(string shown)
     {
         var table = new CompactTable(

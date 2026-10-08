@@ -170,3 +170,28 @@ test('a module cell with no entity stays plain text', function () {
   entities.decorateEntityCell(cell, 5, '');
   assert.equal(cell.children.length === 0 || cell.children[0].tag === '#text', true);
 });
+
+const methodEntity = { id: 0, kind: 'Method', joinKey: 'Serilog.PortableTimer::OnTick', fidelity: 'Low', details: [] };
+
+test('method cell shows the bare name and links to the Class::Method address', function () {
+  entities.setEntityData(documentWith(methodEntity, [], []));
+  const cell = new FakeNode('td');
+  entities.decorateEntityCell(cell, 0, 'OnTick');
+  const link = cell.children[0];
+  assert.equal(link.textContent, 'OnTick');
+  assert.equal(link.href, '#entity/method/' + encodeURIComponent('Serilog.PortableTimer::OnTick'));
+});
+
+test('method page is titled Class::Method and shows its async fact', function () {
+  const page = openPage(methodEntity, [fact('type.async-state-machine', 'Exceptions and async')], [[0, 1, []]]);
+  const panel = document.body.children.find(function (child) { return child.tag === 'aside'; });
+  assert.equal(panel._parts.title.textContent, 'Serilog.PortableTimer::OnTick');
+  assert.equal(panel._parts.kind.textContent, 'method');
+  assert.ok(page.headings.includes('Exceptions and async'));
+  assert.doesNotMatch(page.text, /No facts were reported for/);
+});
+
+test('method page with no async fact says so', function () {
+  const page = openPage(methodEntity, [], []);
+  assert.match(page.text, /No facts were reported for: Exceptions and async\./);
+});

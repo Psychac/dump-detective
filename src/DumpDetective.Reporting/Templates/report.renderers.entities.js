@@ -182,6 +182,7 @@ function expectedEntityPanels(kind) {
     case 'type': return ENTITY_TYPE_PANELS;
     case 'thread': return ENTITY_THREAD_PANELS;
     case 'module': return ['Footprint'];
+    case 'method': return ['Exceptions and async'];
     default: return [];
   }
 }

@@ -182,8 +182,14 @@ internal sealed record AnalyzerRunStatusRecord(
     string? ErrorMessage,
     string? SkipReason = null);
 
-/// <summary>One row of the report's entity table; <paramref name="Id"/> is its index in <see cref="AnalysisReportDocument.Entities"/>.</summary>
-internal sealed record EntityRecord(int Id, DumpDetective.Sdk.Identity.EntityKind Kind, string JoinKey, DumpDetective.Sdk.Identity.MatchFidelity Fidelity);
+/// <summary>
+/// One row of the report's entity table; <paramref name="Id"/> is its index in <see cref="AnalysisReportDocument.Entities"/>.
+/// <paramref name="Details"/> are sorted, distinct facts about the entity that are not part of its identity (for a module, every full
+/// path it was loaded from); null when there are none.
+/// </summary>
+internal sealed record EntityRecord(
+    int Id, DumpDetective.Sdk.Identity.EntityKind Kind, string JoinKey, DumpDetective.Sdk.Identity.MatchFidelity Fidelity,
+    IReadOnlyList<string>? Details = null);
 
 /// <summary>Points at the observations side-car by file name (relative to this report) and content hash.</summary>
 internal sealed record ObservationsReference(string File, string Sha256, long Count, bool Compressed);

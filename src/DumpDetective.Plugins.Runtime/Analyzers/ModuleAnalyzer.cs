@@ -102,6 +102,13 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     /// of loaded assemblies), never heap-object-scale, so observing each fully carries none of the
     /// per-object volume risk this project guards against elsewhere.
     /// </summary>
+    // The module's identity is its file name; the folder it was loaded from is a detail of that module, carried as evidence so the
+    // report can list every path when two loaded modules share a file name.
+    private static IReadOnlyList<EvidenceRef> ModulePathEvidence(AnalysisContext context, LoadedModuleSnapshot module) =>
+        string.IsNullOrWhiteSpace(module.FullPath)
+            ? []
+            : [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = EntityDetailLocators.ModulePath, Description = module.FullPath }];
+
     private static async ValueTask EmitObservationsAsync(AnalysisContext context, ModuleDomainResult result, CancellationToken cancellationToken)
     {
         var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes, CapabilityVocabulary.RuntimeModules };
@@ -161,6 +168,7 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                     Fidelity = FidelityLevel.Full,
                 },
                 Confidence = 1.0,
+                Evidence = ModulePathEvidence(context, module),
             }, cancellationToken);
         }
 

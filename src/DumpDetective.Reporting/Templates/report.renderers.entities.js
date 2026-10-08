@@ -202,6 +202,31 @@ function entityIdentity(entity, groups, claimIndexes) {
   counts.textContent = claimIndexes.length + (claimIndexes.length === 1 ? ' claim' : ' claims') + ' \u00b7 ' + facts.toLocaleString('en-US') + (facts === 1 ? ' fact' : ' facts');
   wrap.appendChild(meta);
   wrap.appendChild(counts);
+  const details = Array.isArray(entity.details) ? entity.details : [];
+  if (details.length) wrap.appendChild(entityDetails(entity, details));
+  return wrap;
+}
+
+// Details are facts about the entity that are not part of its identity. A module is identified by its file name, so two loaded modules
+// that share one are a single entry here; listing every path keeps that visible instead of merging them silently.
+function entityDetails(entity, details) {
+  const wrap = el('div', 'entity-panel__details');
+  const isModule = String(entity.kind) === 'Module';
+  const heading = el('p', 'entity-panel__meta');
+  if (isModule && details.length > 1) {
+    heading.textContent = details.length + ' modules share this file name and are shown as one. Loaded from:';
+    heading.classList.add('entity-panel__meta--warning');
+  } else {
+    heading.textContent = isModule ? 'Loaded from:' : 'Details:';
+  }
+  wrap.appendChild(heading);
+  const list = el('ul', 'entity-panel__paths');
+  for (const detail of details) {
+    const item = el('li', 'entity-panel__path');
+    item.textContent = detail;
+    list.appendChild(item);
+  }
+  wrap.appendChild(list);
   return wrap;
 }
 

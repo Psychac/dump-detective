@@ -151,6 +151,59 @@ public sealed class EntityTableTests : IDisposable
         html.Should().NotContain("Crash.observations.json.gz");
     }
 
+    [Fact]
+    public void Build_ModulePathEvidence_BecomesSortedDistinctDetailsOnTheModule_NotPartOfItsIdentity()
+    {
+        Observation first = WithPath(MakeObservation(Module("a.dll")), @"C:\gac\v2\a.dll");
+        Observation second = WithPath(MakeObservation(Module("a.dll")), @"C:\app\a.dll");
+        Observation repeated = WithPath(MakeObservation(Module("a.dll")), @"C:\app\a.dll");
+
+        IReadOnlyList<EntityRecord> forward = EntityTableBuilder.Build([first, second, repeated], []);
+        IReadOnlyList<EntityRecord> reversed = EntityTableBuilder.Build([repeated, second, first], []);
+
+        EntityRecord module = forward.Should().ContainSingle().Which;
+        module.JoinKey.Should().Be("a.dll");
+        module.Details.Should().Equal(@"C:\app\a.dll", @"C:\gac\v2\a.dll");
+        reversed.Single().Details.Should().Equal(module.Details);
+    }
+
+    [Fact]
+    public void Build_PathEvidenceOnAnythingButAModule_AndBlankPaths_AreIgnored()
+    {
+        Observation onType = WithPath(MakeObservation(Type("A")), @"C:\x\A.dll");
+        Observation blank = WithPath(MakeObservation(Module("b.dll")), "  ");
+        Observation otherEvidence = MakeObservation(Module("c.dll")) with
+        {
+            Evidence = [new DumpDetective.Sdk.Observations.EvidenceRef { Artifact = new ArtifactId("t"), Locator = "original-stack-trace-confidence", Description = "High" }],
+        };
+
+        IReadOnlyList<EntityRecord> table = EntityTableBuilder.Build([onType, blank, otherEvidence], []);
+
+        table.Should().OnlyContain(e => e.Details == null);
+    }
+
+    [Fact]
+    public async Task OutputWriter_WritesDetailsOnlyWhenPresent()
+    {
+        AnalysisReportDocument document = _facade.BuildReportDocument("C:/dumps/Crash.dmp", [], TimeSpan.FromSeconds(1));
+        var writer = new ReportOutputWriter([new ReportJsonSink(_facade)]);
+        Observation[] observations = [WithPath(MakeObservation(Module("a.dll")), @"C:\app\a.dll"), MakeObservation(Type("T"))];
+
+        string json = await WriteAndReadReportJson(writer, document, observations, "Details.html");
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        JsonElement entities = parsed.RootElement.GetProperty("entities");
+        JsonElement module = entities.EnumerateArray().Single(e => e.GetProperty("kind").GetString() == "Module");
+        JsonElement type = entities.EnumerateArray().Single(e => e.GetProperty("kind").GetString() == "Type");
+        module.GetProperty("details")[0].GetString().Should().Be(@"C:\app\a.dll");
+        type.TryGetProperty("details", out _).Should().BeFalse();
+    }
+
+    private static Observation WithPath(Observation observation, string path) => observation with
+    {
+        Evidence = [new DumpDetective.Sdk.Observations.EvidenceRef { Artifact = new ArtifactId("test-artifact"), Locator = EntityDetailLocators.ModulePath, Description = path }],
+    };
+
     private async Task<string> WriteAndReadReportJson(ReportOutputWriter writer, AnalysisReportDocument document, Observation[] observations, string outputName)
     {
         string outputPath = Path.Combine(_tempDir, outputName);

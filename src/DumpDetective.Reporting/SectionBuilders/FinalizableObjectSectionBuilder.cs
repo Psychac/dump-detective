@@ -68,7 +68,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         {
             compactTables.Add(STCompact(
                 "Top finalizer queue entries by estimated retained size",
-                new[] { CH("Address"), CHType("Type Name"), CH("Generation"), CH("Shallow Size","bytes"), CH("Est. Retained","bytes"), CH("Exact?"), CH("IDisposable"), CH("Disposed Field Found"), CH("Disposed"), CH("Critical Finalizer") },
+                new[] { CHObject("Address"), CHType("Type Name"), CH("Generation"), CH("Shallow Size","bytes"), CH("Est. Retained","bytes"), CH("Exact?"), CH("IDisposable"), CH("Disposed Field Found"), CH("Disposed"), CH("Critical Finalizer") },
                 BuildQueueRows(d.TopQueueEntriesByRetainedSize).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

@@ -227,6 +227,47 @@ public sealed class EntityCellTests
         FirstRow(EntityCellPass.Apply(document with { Domains = [document.Domains[0] with { Sections = [section] }] })).Values[0].Should().Be("OnTick");
     }
 
+    [Fact]
+    public void Apply_ObjectColumn_MatchesOnTheAddressAlone_AndKeepsTheShownAddress()
+    {
+        FirstRow(EntityCellPass.Apply(ObjectDocument("0x1E101A03098"))).Values[0].Should().Be(new EntityCell(0, "0x1E101A03098"));
+        FirstRow(EntityCellPass.Apply(ObjectDocument("0x1e101a03098"))).Values[0].Should().Be(new EntityCell(0, "0x1e101a03098"));
+    }
+
+    [Fact]
+    public void Apply_ObjectColumn_LeavesUnknownAndPlaceholderCellsAsText()
+    {
+        foreach (string shown in new[] { "0x1E101A03099", "(unknown)", "", "1E101A03098" })
+            FirstRow(EntityCellPass.Apply(ObjectDocument(shown))).Values[0].Should().Be(shown);
+    }
+
+    [Fact]
+    public void Apply_ObjectColumn_AddressSharedByObjectsOfDifferentDumps_IsNotLinked()
+    {
+        EntityRecord[] entities =
+        [
+            new(0, EntityKind.Object, @"D:.dmp:0x1E101A03098", MatchFidelity.Exact),
+            new(1, EntityKind.Object, @"D:.dmp:0x1E101A03098", MatchFidelity.Exact),
+        ];
+
+        FirstRow(EntityCellPass.Apply(ObjectDocument("0x1E101A03098") with { Entities = entities })).Values[0].Should().Be("0x1E101A03098");
+    }
+
+    private static AnalysisReportDocument ObjectDocument(string shown)
+    {
+        var table = new CompactTable(
+            "Active transactions",
+            [new CompactHeader("Connection Address", EntityColumn.Object)],
+            [new CompactRow([shown])]);
+        var section = new AnalyzerDetailSection("SQL Transaction Analysis", "SQL", 0, []) { CompactTables = [table] };
+        return new SingleDumpReportDocument
+        {
+            DumpPath = @"D:.dmp",
+            Domains = [new ReportDomainSection("Infra", null, [section], [])],
+            Entities = [new EntityRecord(0, EntityKind.Object, @"D:.dmp:0x1E101A03098", MatchFidelity.Exact)],
+        };
+    }
+
     private static AnalysisReportDocument MethodDocument(string declaringTypeShown, string methodShown)
     {
         var table = new CompactTable(

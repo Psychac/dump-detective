@@ -76,9 +76,13 @@ mechanics already exist for types and threads; this milestone extends them to th
    - **Page:** title is the key (`Class::Method`); a method page expects the "Exceptions and async" panel.
    - **Tests:** 4 `EntityCellTests` (same-row match, same name on another type, unknown/cut-off/empty stay text, no declaring-type column), 1 validator test; harness 15 of 15 (3 new).
    - **Real dump:** 7 of 7 method cells linked in both tables, method text unchanged, entity table and summary identical, 0 warnings. Declaring Type links 5 of 7: the other 2 types have no type entity. Results: `m2-step1/verify-m2c5-results.txt`.
-6. **Object pages** *(pending)* — an object's key embeds the full dump path (`<dump path>:0x...`) while tables show the bare address, so the pass
-   must build the key from the address; only 55 of the addresses shown in ~20 tables are entities, the rest stay text. Panels from the SQL
-   transaction facts; title shows the address, not the dump path.
+6. **Object pages** *(done 2026-10-08, verified on reference dump)*
+   - **Measured first:** 55 object entities, all `infra.sql-transaction`, and the entity is the *connection* (the fact's second subject), so the matching column is "Connection Address", not the transaction's "Address". Of 28 address-like columns (70,167 cells) only two match: SQL "Connection Address" (55 of 55) and the finalizer table's "Address" (55 of 68,576). Only those two are marked.
+   - **Column:** `EntityColumn.Object`. The key is `<dump path>:0x...` but tables show the address, so the pass matches on the address alone (case-insensitive) and the cell keeps the shown text (`[id, "0x..."]`). If two entities share an address (a report spanning several dumps) neither is linked.
+   - **Page:** title is the address, not the dump path; the anchor is `#entity/object/<encoded full key>`, so an address from another dump finds no entry and the panel says so. No expected-panel list (objects only ever carry the facts that name them).
+   - **Tests:** 3 `EntityCellTests` (address match and case, unknown/placeholder text, shared address), harness 17 of 17 (2 new); entity suites 133 passed.
+   - **Real dump:** all 55 object entities reached by a link (55 cells in each table), text unchanged, entity table and summary identical, 0 warnings. Results: `m2-step1/verify-m2c6-results.txt`.
+   - **Not done:** other address columns (~26) stay text until an analyzer names those objects as entities.
 7. **Remaining kinds** *(pending, per D4)* — GC root, handle, memory segment, AppDomain, one at a time.
 
 Each step is verified on the reference dump, one run at a time, in the same way as M2.

@@ -70,7 +70,7 @@ internal sealed class SqlTransactionSectionBuilder : SectionBuilderBase, IAnalyz
                 ]));
             }
             compactTables.Add(STCompact("Active transactions holding a connection open",
-                new[] { CH("Type"), CH("Address"), CH("Connection Address") },
+                new[] { CH("Type"), CH("Address"), CHObject("Connection Address") },
                 activeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

@@ -195,3 +195,23 @@ test('method page with no async fact says so', function () {
   const page = openPage(methodEntity, [], []);
   assert.match(page.text, /No facts were reported for: Exceptions and async\./);
 });
+
+const objectEntity = { id: 0, kind: 'Object', joinKey: 'D:\DUmps\Crash.dmp:0x1E101A03098', fidelity: 'High', details: [] };
+
+test('object cell shows the address and links to the keyed page', function () {
+  entities.setEntityData(documentWith(objectEntity, [], []));
+  const cell = new FakeNode('td');
+  entities.decorateEntityCell(cell, 0, '0x1E101A03098');
+  const link = cell.children[0];
+  assert.equal(link.textContent, '0x1E101A03098');
+  assert.equal(link.href, '#entity/object/' + encodeURIComponent(objectEntity.joinKey));
+});
+
+test('object page is titled by its address, not the dump path, and round-trips the address', function () {
+  const page = openPage(objectEntity, [fact('infra.sql-transaction', 'Size and population')], [[0, 1, []]]);
+  const panel = document.body.children.find(function (child) { return child.tag === 'aside'; });
+  assert.equal(panel._parts.title.textContent, '0x1E101A03098');
+  assert.equal(panel._parts.kind.textContent, 'object');
+  assert.ok(page.headings.includes('Size and population'));
+  assert.doesNotMatch(page.text, /No facts were reported for/);
+});

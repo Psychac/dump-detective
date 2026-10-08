@@ -135,7 +135,7 @@ function openEntityPanel(target) {
   const parts = panel._parts;
   const entity = _entityByKey.get(entityKey(target.kind, target.joinKey));
   parts.kind.textContent = target.kind;
-  parts.title.textContent = target.kind === 'thread' ? 'OS thread ' + target.joinKey : target.joinKey;
+  parts.title.textContent = entityPageTitle(target);
   parts.body.textContent = '';
   if (entity) {
     renderEntityBody(parts.body, entity);
@@ -145,6 +145,13 @@ function openEntityPanel(target) {
   panel.hidden = false;
   parts.body.scrollTop = 0;
   parts.close.focus();
+}
+
+// An object's key carries the dump it came from ("<dump path>:0x..."); the page is about the address, so that is the title.
+function entityPageTitle(target) {
+  if (target.kind === 'thread') return 'OS thread ' + target.joinKey;
+  if (target.kind === 'object') return target.joinKey.slice(target.joinKey.lastIndexOf(':') + 1);
+  return target.joinKey;
 }
 
 function closeEntityPanel(restoreAddress) {

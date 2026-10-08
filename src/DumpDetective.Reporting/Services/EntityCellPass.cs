@@ -21,6 +21,7 @@ internal static class EntityCellPass
             [EntityKind.Thread] = IdsByJoinKey(entities, EntityKind.Thread),
             [EntityKind.Module] = IdsByJoinKey(entities, EntityKind.Module),
             [EntityKind.Method] = IdsByJoinKey(entities, EntityKind.Method),
+            [EntityKind.Object] = IdsByAddress(entities),
         };
         var domains = new List<ReportDomainSection>(document.Domains.Count);
         foreach (ReportDomainSection domain in document.Domains)
@@ -37,6 +38,28 @@ internal static class EntityCellPass
             if (entities[i].Kind == kind)
                 ids[entities[i].JoinKey] = entities[i].Id;
         }
+
+        return ids;
+    }
+
+    // An object's key is "<dump>:0x<address>" but tables show the address alone. One report is one dump, so the address identifies the
+    // object; if two entities ever share an address (a report spanning several dumps) neither is linked, rather than guessing.
+    private static Dictionary<string, int> IdsByAddress(IReadOnlyList<EntityRecord> entities)
+    {
+        var ids = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var ambiguous = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (EntityRecord entity in entities)
+        {
+            if (entity.Kind != EntityKind.Object)
+                continue;
+
+            string address = entity.JoinKey[(entity.JoinKey.LastIndexOf(':') + 1)..];
+            if (!ids.TryAdd(address, entity.Id))
+                ambiguous.Add(address);
+        }
+
+        foreach (string address in ambiguous)
+            ids.Remove(address);
 
         return ids;
     }
@@ -102,6 +125,8 @@ internal static class EntityCellPass
                 cells[column] = kind switch
                 {
                     EntityKind.Thread => ThreadCell(cells[column]!, idsByKind[EntityKind.Thread]),
+                    EntityKind.Object => cells[column] is string addressText && idsByKind[EntityKind.Object].TryGetValue(addressText, out int objectId)
+                        ? new EntityCell(objectId, addressText) : cells[column],
                     EntityKind.Method => ToMethodCell(row.Values, column, declaringTypeColumn, idsByKind[EntityKind.Method]),
                     EntityKind.Module => cells[column] is string moduleText ? (object?)ToModuleCell(moduleText, idsByKind[EntityKind.Module]) ?? moduleText : cells[column],
                     _ => cells[column] is string shownName ? (object?)ToTypeCell(shownName, idsByKind[EntityKind.Type]) ?? shownName : cells[column],

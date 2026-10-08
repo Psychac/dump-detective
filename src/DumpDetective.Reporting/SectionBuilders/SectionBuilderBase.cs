@@ -77,6 +77,10 @@ internal abstract class SectionBuilderBase
     protected static CompactHeader CHModule(string name, bool sortable = true)
         => new(name, EntityColumn.Module, null, sortable);
 
+    // Object columns show a bare "0x..." address; the entity's key also names the dump, so the pass matches on the address alone.
+    protected static CompactHeader CHObject(string name, bool sortable = true)
+        => new(name, EntityColumn.Object, null, sortable);
+
     // Method columns show the bare method name; the pass finds the declaring type in the row's "Declaring Type" type column.
     protected static CompactHeader CHMethod(string name, bool sortable = true)
         => new(name, EntityColumn.Method, null, sortable);

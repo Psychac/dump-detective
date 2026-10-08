@@ -5,7 +5,8 @@ Everything about DumpDetective's reporting layer: where it is going, and where i
 ## The design baseline
 
 Three documents. All are design proposals — **none of them describes what ships today**, except that vision § 19
-step M1 (claims) has shipped; [m1-claims-plan.md](m1-claims-plan.md) records what it built.
+steps M1 (claims) and M2 (entities) have shipped; [m1-claims-plan.md](m1-claims-plan.md) and
+[m2-entities-plan.md](m2-entities-plan.md) record what they built.
 
 | Doc | Defines |
 |---|---|
@@ -22,6 +23,7 @@ states the disagreement explicitly in its §20.
 | Doc | Covers |
 |---|---|
 | [m1-claims-plan.md](m1-claims-plan.md) | vision § 19 step M1 (claims), with Phase 8's sinks and unconditional `report.json` folded in. **Done 2026-10-06** |
+| [m2-entities-plan.md](m2-entities-plan.md) | vision § 19 step M2 (entities): entity table, entity-typed columns, per-entity summary, type and thread page. **Done 2026-10-08**; relations (M2b) and more entity kinds (M2c) deferred |
 
 ## Where current-state truth lives
 

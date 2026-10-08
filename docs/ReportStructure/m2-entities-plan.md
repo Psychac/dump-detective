@@ -6,7 +6,12 @@ entity model is specified in [ReportSystemVision.md § 4](ReportSystemVision.md#
 the dossier surface in [§ 9.3](ReportSystemVision.md#93-surface-3--dossier); this doc covers only
 sequencing, what exists today, and decisions before starting.
 
-**Status:** draft 2026-10-06, nothing built. D1 decided 2026-10-06 (revised 2026-10-07 to option B); D2 decided 2026-10-07; D1–D5 all decided by 2026-10-07.
+**Status:** done 2026-10-08 (steps 1-8). Decisions D1-D5 all made by 2026-10-07 (D1 revised to option B on 2026-10-07).
+Not built, tracked under *Deferred work*: relations (M2b) and more entity kinds and dossiers (M2c). Loose ends:
+- **Generation fold:** the panel lists each fact kind separately; folding the agreeing generation measures across kinds was decided but left out (a space-saver, not a correctness feature).
+- **Unshown finding:** `gc root analysis::subgraph-walk-capped` is computed but appears in no section; not investigated.
+- **Full stack traces:** the report carries only a top frame per thread; storing full traces is a separate decision.
+- **Panel refinement:** the user judged the first panel "pretty good for now"; visual refinement is deferred.
 
 ## Why M2 next
 

@@ -62,7 +62,7 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
             var moduleRows = new List<TableRow>(d.TopActiveModulesByFrameHits.Count);
             foreach (NameCountEntry e in d.TopActiveModulesByFrameHits)
                 moduleRows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
-            compactTables.Add(STCompact("Active modules (per-module JIT stack heatmap)", new[] { CH("Module"), CH("Stack Hits","number") }, moduleRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Active modules (per-module JIT stack heatmap)", new[] { CHModule("Module"), CH("Stack Hits","number") }, moduleRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopLargestMethods.Count > 0)

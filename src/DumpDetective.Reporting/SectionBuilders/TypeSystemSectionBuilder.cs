@@ -94,7 +94,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 
         compactTables.Add(STCompact(
             "Type table",
-            new[] { CHType("Type"), CH("Count","number"), CH("Shallow Size","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Gen0%", "number", "percent"), CH("Gen1%", "number", "percent"), CH("Gen2%", "number", "percent"), CH("Finalizable"), CH("Value Type"), CH("Ref Fields","number"), CH("Ref Ratio", "number", "ratio"), CH("Array"), CH("Base Depth","number"), CH("Interfaces","number"), CH("Module"), CH("Method Table") },
+            new[] { CHType("Type"), CH("Count","number"), CH("Shallow Size","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Gen0%", "number", "percent"), CH("Gen1%", "number", "percent"), CH("Gen2%", "number", "percent"), CH("Finalizable"), CH("Value Type"), CH("Ref Fields","number"), CH("Ref Ratio", "number", "ratio"), CH("Array"), CH("Base Depth","number"), CH("Interfaces","number"), CHModule("Module"), CH("Method Table") },
             rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         if (shape?.TopValueHeavyTypes is { Count: > 0 })
@@ -172,7 +172,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             keyMetrics["estimated_finalizable_gen2_bytes"] = new NumericMetricValue((double)Math.Min(totalEstimatedBytes, long.MaxValue), MetricUnit.Bytes, FormatBytes(totalEstimatedBytes));
             compactTables.Add(STCompact(
                 "Finalizable types by estimated Gen2 overhead",
-                new[] { CHType("Type"), CH("Gen2 Count","number"), CH("Avg Size","bytes"), CH("Est. Gen2 Bytes","bytes"), CH("Module") },
+                new[] { CHType("Type"), CH("Gen2 Count","number"), CH("Avg Size","bytes"), CH("Est. Gen2 Bytes","bytes"), CHModule("Module") },
                 overheadRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             if (finalizableOverheadRows.Count > finalizableLimit)

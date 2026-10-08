@@ -9,6 +9,7 @@ internal static class EntityColumn
     public const string TypePrefix = "entity:";
     public const string Type = TypePrefix + "type";
     public const string Thread = TypePrefix + "thread";
+    public const string Module = TypePrefix + "module";
 
     public static bool IsEntityColumn(CompactHeader header) =>
         header.Type is not null && header.Type.StartsWith(TypePrefix, StringComparison.Ordinal);
@@ -17,6 +18,7 @@ internal static class EntityColumn
     {
         Type => EntityKind.Type,
         Thread => EntityKind.Thread,
+        Module => EntityKind.Module,
         _ => throw new ArgumentException($"Not an entity column: {header.Type}", nameof(header)),
     };
 }

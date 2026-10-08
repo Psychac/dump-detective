@@ -107,7 +107,7 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 ]));
             }
             compactTables.Add(STCompact("HttpMessageHandler by module",
-                new[] { CH("Module"), CH("Count", "number"), CH("Heap Size") },
+                new[] { CHModule("Module"), CH("Count", "number"), CH("Heap Size") },
                 handlerModuleRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

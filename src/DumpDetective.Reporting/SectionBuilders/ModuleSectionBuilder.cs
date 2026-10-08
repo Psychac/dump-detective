@@ -82,7 +82,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(m.IsPEFile   ? "Yes" : "No"),
                     Cell(alcDisplay)));
             }
-            compactTables.Add(STCompact("Top modules by size", new[] { CH("Name"), CH("Assembly"), CH("Full Path"), CH("Address"), CH("Size","bytes"), CH("Dynamic"), CH("PE File"), CH("Load Context") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top modules by size", new[] { CHModule("Name"), CH("Assembly"), CH("Full Path"), CH("Address"), CH("Size","bytes"), CH("Dynamic"), CH("PE File"), CH("Load Context") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.ConflictDetails.Count > 0)
@@ -96,7 +96,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(conflict.Instances.Count.ToString("N0"), conflict.Instances.Count),
                     Cell(string.Join("; ", conflict.Instances.Take(3).Select(m => m.AssemblyName)))));
             }
-            compactTables.Add(STCompact("Conflict details", new[] { CH("Module"), CH("Instances","number"), CH("Assemblies") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Conflict details", new[] { CHModule("Module"), CH("Instances","number"), CH("Assemblies") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopModulesByHeapMemory is { Count: > 0 })
@@ -115,7 +115,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(stats.Gen2ObjectCount.ToString("N0"),  stats.Gen2ObjectCount),
                     Cell(FormatBytes(stats.LohBytes),           (long)Math.Min(stats.LohBytes, long.MaxValue))));
             }
-            compactTables.Add(STCompact("Modules by heap footprint", new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Total Bytes","bytes"), CH("Gen2 Objects","number"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Modules by heap footprint", new[] { CHModule("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Total Bytes","bytes"), CH("Gen2 Objects","number"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             var topTypeRows = new List<TableRow>();
             for (int i = 0; i < d.TopModulesByHeapMemory.Count; i++)
@@ -136,7 +136,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             if (topTypeRows.Count > 0)
             {
                 compactTables.Add(STCompact("Top types in heaviest modules",
-                    new[] { CH("Module"), CHType("Type"), CH("Objects", "number"), CH("Bytes", "bytes") },
+                    new[] { CHModule("Module"), CHType("Type"), CH("Objects", "number"), CH("Bytes", "bytes") },
                     topTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
@@ -155,7 +155,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatBytes(density.TotalBytes),         (long)Math.Min(density.TotalBytes, long.MaxValue)),
                     Cell(FormatBytes(density.BytesPerType),       (long)Math.Min(density.BytesPerType, long.MaxValue))));
             }
-            compactTables.Add(STCompact("Type density", new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Bytes","bytes"), CH("Bytes/Type","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Type density", new[] { CHModule("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Bytes","bytes"), CH("Bytes/Type","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.CrossDomainModuleLoads is { Count: > 0 })
@@ -170,7 +170,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(m.DomainCount.ToString("N0"), m.DomainCount),
                     Cell(FormatBytes(m.Size), (long)Math.Min(m.Size, long.MaxValue))));
             }
-            compactTables.Add(STCompact("Cross-domain module loads", new[] { CH("Module"), CH("Assembly"), CH("Domains", "number"), CH("Size", "bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Cross-domain module loads", new[] { CHModule("Module"), CH("Assembly"), CH("Domains", "number"), CH("Size", "bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.AssemblyRefVersionMismatches is { Count: > 0 })
@@ -211,7 +211,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatBytes(entry.TotalBytes),      (long)Math.Min(entry.TotalBytes, long.MaxValue))));
             }
             compactTables.Add(STCompact("Top modules by type count",
-                new[] { CH("Module"), CH("Assembly"), CH("Types", "number"), CH("Live Types", "number"), CH("Objects", "number"), CH("Bytes", "bytes") },
+                new[] { CHModule("Module"), CH("Assembly"), CH("Types", "number"), CH("Live Types", "number"), CH("Objects", "number"), CH("Bytes", "bytes") },
                 typeCountRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

@@ -153,6 +153,57 @@ public sealed class EntityCellTests
         FirstRow(rewritten).Values[0].Should().Be("24088");
     }
 
+    [Fact]
+    public void Apply_ModuleColumn_MatchesAFileNameDirectly()
+    {
+        FirstRow(EntityCellPass.Apply(ModuleDocument("mscorlib.dll"))).Values[0].Should().Be(new EntityCell(3, null));
+    }
+
+    [Fact]
+    public void Apply_ModuleColumn_ShowingAFullPath_MatchesOnTheFileNameAndKeepsThePathAsTheExactText()
+    {
+        const string path = @"C:\Windows\Microsoft.Net\assembly\GAC_64\mscorlib\v4.0\mscorlib.dll";
+
+        FirstRow(EntityCellPass.Apply(ModuleDocument(path))).Values[0].Should().Be(new EntityCell(3, path));
+        FirstRow(EntityCellPass.Apply(ModuleDocument("C:/unix/style/mscorlib.dll"))).Values[0].Should().Be(new EntityCell(3, "C:/unix/style/mscorlib.dll"));
+    }
+
+    [Fact]
+    public void Apply_ModuleColumn_LeavesTruncatedUnknownAndPlaceholderCellsAsText()
+    {
+        foreach (string shown in new[] { @"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\Temp...", "unknown.dll", "\u2014", "", @"C:\folder\" })
+            FirstRow(EntityCellPass.Apply(ModuleDocument(shown))).Values[0].Should().Be(shown);
+    }
+
+    [Fact]
+    public void Apply_ModuleColumn_DoesNotMatchATypeOrAThreadWithTheSameText()
+    {
+        EntityRecord[] entities = [new(0, EntityKind.Type, "mscorlib.dll", MatchFidelity.Exact), new(1, EntityKind.Thread, "mscorlib.dll", MatchFidelity.Exact)];
+
+        FirstRow(EntityCellPass.Apply(ModuleDocument("mscorlib.dll") with { Entities = entities })).Values[0].Should().Be("mscorlib.dll");
+    }
+
+    private static AnalysisReportDocument ModuleDocument(string shown)
+    {
+        var table = new CompactTable(
+            "Modules by heap footprint",
+            [new CompactHeader("Module", EntityColumn.Module), new CompactHeader("Objects", "number")],
+            [new CompactRow([shown, 5L])]);
+        var section = new AnalyzerDetailSection("Module Analysis", "Module Analysis", 0, []) { CompactTables = [table] };
+        return new SingleDumpReportDocument
+        {
+            DumpPath = "C:/dumps/Crash.dmp",
+            Domains = [new ReportDomainSection("Runtime", null, [section], [])],
+            Entities =
+            [
+                new EntityRecord(0, EntityKind.Type, "System.Data.DataColumn", MatchFidelity.Exact),
+                new EntityRecord(1, EntityKind.Thread, "24088", MatchFidelity.Exact),
+                new EntityRecord(2, EntityKind.Module, "System.dll", MatchFidelity.Exact),
+                new EntityRecord(3, EntityKind.Module, "mscorlib.dll", MatchFidelity.Exact),
+            ],
+        };
+    }
+
     private static AnalysisReportDocument ThreadDocument(object? osThread, long count)
     {
         var table = new CompactTable(

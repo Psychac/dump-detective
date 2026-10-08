@@ -44,9 +44,20 @@ mechanics already exist for types and threads; this milestone extends them to th
      details; entity table identical to before apart from `details`; summary, claims and observation count (97,417) identical; +43 KB of paths in
      `report.json`, HTML 3.127 → 3.135 MB. No validator warnings. Results: `m2-step1/m2c1-results.txt`.
    - **Not yet:** nothing links to module pages until step 2; the page already opens by address (module facts land in the "Other" panel until step 3).
-2. **Module columns** *(pending)* — mark the "Module" columns `entity:module` (new `EntityColumn.Module`, `CHModule`, `KindOf`,
-   pass, validator and client). Cells that show a full path or a truncated path cannot be matched to a file-name key reliably;
-   decide per column whether to link the "Module" (file name) column only.
+2. **Module columns** *(done 2026-10-08, verified on the reference dump; uncommitted)*
+   - **Measured first** (`m2-step1/module-columns-results.txt`): every "Module" column and the module table's "Name" column hold exact file names, except the
+     JIT table, which shows full paths. The "Assembly" and "Full Path" columns hold paths truncated for display ("..."), so they match nothing and are left
+     as text. Truncation also stops names longer than 55 or 45 characters from matching (1 name here).
+   - **Change:** `EntityColumn.Module` and `CHModule`; 10 columns marked across the Module, JIT, HTTP, Memory, Array and TypeSystem builders. The pass matches a cell
+     to a module by file name; a cell showing a path matches on the file name at its end and keeps the path as its exact text (`[id, "<path>"]`). Link text is
+     unchanged, so tables look the same.
+   - **Tests:** 4 new in `EntityCellTests` (direct match, a path with either slash, truncated / unknown / placeholder / folder-only cells stay text, a module is never
+     matched to a type or thread with the same text). Panel harness 45 of 45 (2 new).
+   - **Real dump (1m48s):** 10 module columns, 16,099 cells: 15,370 entity ids, 22 id-plus-path (the JIT table), 707 text (the unnamed module, truncated or
+     missing names, placeholders). **0 mismatches** against the previous run's text; entity table and summary identical; `report.json` 84.44 MB (smaller, since module
+     names became ids), HTML 3.135 MB; no validator warnings. Results: `m2-step1/verify-m2c2-results.txt`.
+   - **Test-suite environment problem (resolved):** with C: full (0 bytes free) three temp-writing tests failed (`HeapIndexScanDispatcherTests`,
+     `CacheContainerWriterChecksumProgressTests`, `RetainedSizeCandidateSelectorTests`), identically with this change stashed. After freeing space they pass (31 of 31).
 3. **Module panels** *(pending)* — Footprint (disk, heap), Activity (JIT frames), Identity (HTTP handler, unknown identity) in
    `EntityFactPanels`; thread-style expected-panel list in the client; an identity note that lists shared-name paths.
 4. **Module anchors** *(pending)* — `#entity/module/<name>`; validator and Node harness extended.

@@ -36,7 +36,7 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         {
             compactTables.Add(STCompact(
                 "Top array types by total bytes",
-                new[] { CHType("Element Type"), CH("Module"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim"), CH("Avg Instance Size","bytes"), CH("% Heap","number","percent"), CH("% Gen2+LOH","number","percent") },
+                new[] { CHType("Element Type"), CHModule("Module"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim"), CH("Avg Instance Size","bytes"), CH("% Heap","number","percent"), CH("% Gen2+LOH","number","percent") },
                 BuildTypeRows(d.TopArrayTypesBySize).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

@@ -19,6 +19,7 @@ internal static class EntityCellPass
         {
             [EntityKind.Type] = IdsByJoinKey(entities, EntityKind.Type),
             [EntityKind.Thread] = IdsByJoinKey(entities, EntityKind.Thread),
+            [EntityKind.Module] = IdsByJoinKey(entities, EntityKind.Module),
         };
         var domains = new List<ReportDomainSection>(document.Domains.Count);
         foreach (ReportDomainSection domain in document.Domains)
@@ -96,9 +97,12 @@ internal static class EntityCellPass
                     continue;
 
                 EntityKind kind = EntityColumn.KindOf(table.Headers[column]);
-                cells[column] = kind == EntityKind.Thread
-                    ? ThreadCell(cells[column]!, idsByKind[EntityKind.Thread])
-                    : cells[column] is string shownName ? (object?)ToTypeCell(shownName, idsByKind[EntityKind.Type]) ?? shownName : cells[column];
+                cells[column] = kind switch
+                {
+                    EntityKind.Thread => ThreadCell(cells[column]!, idsByKind[EntityKind.Thread]),
+                    EntityKind.Module => cells[column] is string moduleText ? (object?)ToModuleCell(moduleText, idsByKind[EntityKind.Module]) ?? moduleText : cells[column],
+                    _ => cells[column] is string shownName ? (object?)ToTypeCell(shownName, idsByKind[EntityKind.Type]) ?? shownName : cells[column],
+                };
             }
 
             rows.Add(new CompactRow(cells));
@@ -123,6 +127,20 @@ internal static class EntityCellPass
             return cell;
 
         return threadIds.TryGetValue(joinKey, out int id) ? new EntityCell(id, null) : joinKey;
+    }
+
+    // A module is its file name. A cell that shows the name matches directly; one that shows the full path (the JIT table) matches on the
+    // file name at its end and keeps the path as the exact text. A cell cut short for display ("...") matches nothing and stays text.
+    private static EntityCell? ToModuleCell(string shown, Dictionary<string, int> moduleIds)
+    {
+        if (moduleIds.TryGetValue(shown, out int id))
+            return new EntityCell(id, null);
+
+        int separator = shown.LastIndexOfAny(['\\', '/']);
+        if (separator < 0 || separator == shown.Length - 1)
+            return null;
+
+        return moduleIds.TryGetValue(shown[(separator + 1)..], out id) ? new EntityCell(id, shown) : null;
     }
 
     private static EntityCell? ToTypeCell(string shownName, Dictionary<string, int> typeIds)

@@ -73,6 +73,10 @@ internal abstract class SectionBuilderBase
     protected static CompactHeader CHType(string name, bool sortable = true)
         => new(name, EntityColumn.Type, null, sortable);
 
+    // Module columns link by file name, the module's identity; a cell that shows a path is matched by the file name at its end.
+    protected static CompactHeader CHModule(string name, bool sortable = true)
+        => new(name, EntityColumn.Module, null, sortable);
+
     // Thread columns link by OS thread id, the id the entity table keys threads on; managed ids stay plain numbers.
     protected static CompactHeader CHThread(string name, bool sortable = true)
         => new(name, EntityColumn.Thread, null, sortable);

@@ -14,6 +14,22 @@ internal sealed class ReportOutputWriter(IEnumerable<IReportSink> sinks)
 {
     private readonly IReadOnlyList<IReportSink> _sinks = sinks.ToArray();
 
+    private const int MaxReportedEntityProblems = 10;
+
+    // The report is still written: a reader is better served by a report with one dead link than by none.
+    private static void ReportBrokenEntityReferences(AnalysisReportDocument document)
+    {
+        IReadOnlyList<string> problems = EntityReferenceValidator.Validate(document);
+        if (problems.Count == 0)
+            return;
+
+        ConsoleUx.Warning($"{problems.Count} broken entity reference(s) in the report; those links will not open correctly.");
+        for (int i = 0; i < problems.Count && i < MaxReportedEntityProblems; i++)
+            ConsoleUx.Warning("  " + problems[i]);
+        if (problems.Count > MaxReportedEntityProblems)
+            ConsoleUx.Warning($"  ...and {problems.Count - MaxReportedEntityProblems} more.");
+    }
+
     public async Task WriteAsync(
         ResolvedExecutionOptions resolved,
         AnalysisReportDocument? document,
@@ -45,6 +61,8 @@ internal sealed class ReportOutputWriter(IEnumerable<IReportSink> sinks)
                         EntitySummary = entities is null ? null : EntitySummaryBuilder.Build(observations, entities, document.Findings),
                     };
                 }
+
+                ReportBrokenEntityReferences(document);
 
                 foreach (IReportSink sink in _sinks)
                     await sink.PublishAsync(resolved, document, cancellationToken);

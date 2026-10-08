@@ -344,10 +344,20 @@ sequencing, what exists today, and decisions before starting.
      (the "—" placeholders in the exception-instances table); **0 mismatches**; entity table and summary identical to the previous run.
      Sizes: `report.json` 84.61 MB (unchanged), HTML 3.127 MB. Results: `m2-step1/verify-step7-results.txt`.
    - **Not done:** thread links from outside tables (for example from claims or the header), full stack traces in the page.
-8. **Anchors** *(pending)* — `#entity/type/<name>`, `#entity/thread/<id>`. A broken anchor fails the
-   build ([§ 9.5](ReportSystemVision.md#95-citation-and-anchoring)).
-
-Each step is verified on the reference dump, one run at a time.
+8. **Anchors** *(done 2026-10-08, uncommitted)* — [§ 9.5](ReportSystemVision.md#95-citation-and-anchoring).
+   - **Already true, from steps 5-7:** `#entity/type/<name>` and `#entity/thread/<os id>` open the page. The address is the entity's own name or OS id,
+     not a numbered id, so it is stable across re-renders of one dump; an address from another dump finds no entry and the panel says so, rather than
+     opening a different object.
+   - **"A broken anchor is a build failure", decided 2026-10-08: report loudly, still write the report** (a reader is better served by a report with one
+     dead link than by none). `EntityReferenceValidator` runs in `ReportOutputWriter` just before the sinks publish, and prints a warning with the count
+     and the first 10 problems.
+   - **What it checks:** entity ids equal their row; every summary row names an entity in the table; every fact-kind, measure and claim index is in
+     range; every listed claim id is a finding; every entity cell in a table points inside the entity table at the kind its column holds; no bare number
+     is left in an entity column.
+   - **Tests:** 7 in `EntityReferenceValidatorTests`, one per kind of break plus the clean cases; suite green (1711 passed, 66 skipped).
+   - **Real dump (1m25s):** no warnings. That shows no false alarms; detection is shown by the unit tests, not by the real run.
+   - **Deferred, with their milestones:** `#claim/...`, `#obs/...`, `#q/...` and the `/retention` sub-panel suffix (M5 and later). Claim cards already
+     have their own `#finding-...` anchors.
 
 ## Open questions
 

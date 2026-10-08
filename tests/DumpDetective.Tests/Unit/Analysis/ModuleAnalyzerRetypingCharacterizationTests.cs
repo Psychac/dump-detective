@@ -6,6 +6,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
 
 using FluentAssertions;
 
@@ -217,6 +218,36 @@ public sealed class ModuleAnalyzerRetypingCharacterizationTests
         ModuleDomainResult result = await Analyze(new FakeRuntimeModuleQuery(), new FakeDumpObjectFieldQuery(), typeStats, options);
 
         result.HeavyTypeDensityModules.Should().ContainSingle().Which.ModuleName.Should().Be("App.dll");
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_EmitsOneAppDomainFootprintFactPerNamedDomain()
+    {
+        var modules = new FakeRuntimeModuleQuery();
+        modules.AddDomain(1, "DefaultDomain");
+        modules.AddDomain(3, "/LM/W3SVC/1/ROOT");
+        modules.AddDomain(4, "");
+        modules.AddDomainModule(1, 0x1000, "A.dll", "A, Version=1.0.0.0");
+        modules.AddDomainModule(3, 0x2000, "B.dll", "B, Version=1.0.0.0");
+        modules.AddDomainModule(3, 0x3000, "C.dll", "C, Version=1.0.0.0");
+        var sink = new CollectingObservationSink();
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new()
+        {
+            Observations = sink,
+            ArtifactId = new ArtifactId("test"),
+            RuntimeModules = modules,
+            DumpObjectFields = new FakeDumpObjectFieldQuery(),
+            HeapTypeStatistics = new FakeHeapTypeStatisticsQuery(),
+            AnalyzerOptions = new ModuleAnalysisOptions(),
+        };
+
+        await new ModuleAnalyzer().AnalyzeAsync(context, CancellationToken.None);
+
+        var domainFacts = sink.Observations.Where(o => o.ObservationType == "runtime.appdomain-footprint").ToList();
+        domainFacts.Should().HaveCount(2, "the unnamed domain has no name to identify it by");
+        domainFacts.Should().OnlyContain(o => o.Subjects.Count == 1 && o.Subjects[0] is AppDomainRef);
+        domainFacts.Single(o => o.Subjects[0].JoinKey == "DefaultDomain").Measures["module.count"].Value.Should().Be(1);
+        domainFacts.Single(o => o.Subjects[0].JoinKey == "/LM/W3SVC/1/ROOT").Measures["module.count"].Value.Should().Be(2);
     }
 
     private static async Task<ModuleDomainResult> Analyze(

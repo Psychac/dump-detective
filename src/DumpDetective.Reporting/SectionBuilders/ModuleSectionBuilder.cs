@@ -192,7 +192,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         {
             compactTables.Add(STCompact(
                 "AppDomain inventory",
-                new[] { CH("Domain Name"), CH("ID", "number"), CH("Address"), CH("Module Count", "number"), CH("Estimated Managed Bytes", "bytes") },
+                new[] { CHAppDomain("Domain Name"), CH("ID", "number"), CH("Address"), CH("Module Count", "number"), CH("Estimated Managed Bytes", "bytes") },
                 BuildDomainRows(d.Domains).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -229,7 +229,7 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         {
             AppDomainSnapshot domain = domains[i];
             rows.Add(Row(
-                Cell(FormatHelper.TruncateString(domain.Name, 60)),
+                Cell(domain.Name),
                 Cell(domain.DomainId.ToString("N0"),                                                    domain.DomainId),
                 Cell($"0x{domain.Address:X}"),
                 Cell(domain.ModuleCount.ToString("N0"),                                                 domain.ModuleCount),

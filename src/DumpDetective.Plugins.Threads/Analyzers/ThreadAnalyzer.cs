@@ -7,6 +7,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -118,6 +119,8 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         /// categorization); bounded by real thread count (hundreds at most on any real dump, never
         /// heap-scale).
         /// </summary>
+        private const string NoAppDomainLabel = "<No AppDomain>";
+
         private static async ValueTask<ThreadDomainResult> Analyze(IRuntimeThreadQuery threads, AnalysisContext observationContext, CancellationToken cancellationToken)
         {
             var categorization = new ThreadCategorization();
@@ -182,6 +185,32 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                 },
                 Confidence = 1.0,
             }, cancellationToken);
+
+            foreach (KeyValuePair<string, int> domain in categorization.AppDomainDistribution)
+            {
+                if (domain.Key == NoAppDomainLabel)
+                    continue;
+
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "thread.appdomain-population",
+                    Subjects = [new AppDomainRef { Name = domain.Key, Fidelity = MatchFidelity.Exact }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["thread.count"] = new Measure(domain.Value, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Thread Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
 
             if (categorization.FinalizerThread is { } finalizerThread)
             {
@@ -255,7 +284,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             IncrementCount(result.StateDistribution, thread.ThreadStateDisplay);
             IncrementCount(result.GcModeDistribution, thread.GcModeDisplay);
 
-            string appDomain = thread.AppDomainName ?? "<No AppDomain>";
+            string appDomain = thread.AppDomainName ?? NoAppDomainLabel;
             IncrementCount(result.AppDomainDistribution, appDomain);
 
             if (thread.HasCurrentException)

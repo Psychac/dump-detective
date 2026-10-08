@@ -233,6 +233,8 @@ public sealed class SdkRegistryConformanceTests
             ["runtime.exception-type"] = ["instance.count"],
             ["runtime.crash-thread-candidate-module"] = ["active-exception.count"],
             ["runtime.module-disk-footprint"] = ["disk.bytes"],
+            ["runtime.appdomain-footprint"] = ["module.count", "shallow.bytes"],
+            ["thread.appdomain-population"] = ["thread.count"],
             ["thread.stack-cluster-member"] = ["cluster.rank"],
             ["type.known-pattern-population"] = ["instance.count", "shallow.bytes"],
         };

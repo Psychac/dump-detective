@@ -102,6 +102,20 @@
         {
           "type": "object",
           "properties": {
+            "$kind": { "const": "appdomain" },
+            "kind": { "const": "AppDomain" },
+            "name": { "type": "string" },
+            "domainId": { "type": ["integer", "null"], "description": "Dump-local handle, not part of joinKey." },
+            "joinKey": { "type": "string" },
+            "fidelity": { "$ref": "#/$defs/matchFidelity" }
+          },
+          "required": ["$kind", "kind", "name", "joinKey", "fidelity"],
+          "additionalProperties": false
+        },
+
+        {
+          "type": "object",
+          "properties": {
             "$kind": { "const": "thread" },
             "kind": { "const": "Thread" },
             "osThreadId": { "type": "integer", "minimum": 0 },

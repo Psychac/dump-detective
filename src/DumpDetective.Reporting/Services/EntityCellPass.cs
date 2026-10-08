@@ -22,6 +22,7 @@ internal static class EntityCellPass
             [EntityKind.Module] = IdsByJoinKey(entities, EntityKind.Module),
             [EntityKind.Method] = IdsByJoinKey(entities, EntityKind.Method),
             [EntityKind.Object] = IdsByAddress(entities),
+            [EntityKind.AppDomain] = IdsByJoinKey(entities, EntityKind.AppDomain),
         };
         var domains = new List<ReportDomainSection>(document.Domains.Count);
         foreach (ReportDomainSection domain in document.Domains)
@@ -125,6 +126,8 @@ internal static class EntityCellPass
                 cells[column] = kind switch
                 {
                     EntityKind.Thread => ThreadCell(cells[column]!, idsByKind[EntityKind.Thread]),
+                    EntityKind.AppDomain => cells[column] is string { Length: > 0 } domainName && idsByKind[EntityKind.AppDomain].TryGetValue(domainName, out int domainId)
+                        ? new EntityCell(domainId, null) : cells[column],
                     EntityKind.Object => cells[column] is string addressText && idsByKind[EntityKind.Object].TryGetValue(addressText, out int objectId)
                         ? new EntityCell(objectId, addressText) : cells[column],
                     EntityKind.Method => ToMethodCell(row.Values, column, declaringTypeColumn, idsByKind[EntityKind.Method]),

@@ -80,6 +80,8 @@ internal static class EntityFactPanels
         ["runtime.module-heap-footprint"] = Footprint,
         ["runtime.module-type-density"] = Footprint,
         ["runtime.jit-module-frames"] = Activity,
+        ["runtime.appdomain-footprint"] = Footprint,
+        ["thread.appdomain-population"] = Activity,
         ["infra.http-handler-module"] = Identity,
         ["runtime.module-unknown-identity"] = Identity,
         ["runtime.module-conflict-group"] = Identity,
@@ -93,7 +95,7 @@ internal static class EntityFactPanels
     {
         "instance.count", "shallow.bytes", "gen0.count", "gen1.count", "gen2.count", "gen2.bytes", "loh.count", "loh.bytes",
         "total.bytes", "total.count", "object.count", "count", "subscriber.count", "pinned.count", "pinned.bytes",
-        "captured.bytes", "wasted.bytes", "wasted-padding.bytes", "waste.count", "waste.bytes",
+        "captured.bytes", "module.count", "thread.count", "wasted.bytes", "wasted-padding.bytes", "waste.count", "waste.bytes",
     };
 
     public static string PanelFor(string factKind) =>

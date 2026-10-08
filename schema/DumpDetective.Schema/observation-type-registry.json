@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.95.0",
+  "registryVersion": "1.96.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -1169,6 +1169,31 @@
       },
       "note": "On-disk module size from the already-capped TopModulesBySize list; a different quantity from runtime.module-heap-footprint's heap bytes. Added in phase 5 step 6.2 for CrashModuleHotspotInsightRule and JitModuleHotspotInsightRule.",
       "addedIn": "1.88.0"
+    },
+    "runtime.appdomain-footprint": {
+      "producedBy": "ModuleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/ModuleAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "runtime.modules"],
+      "subjectKind": "appdomain",
+      "temporalKind": "point",
+      "measures": {
+        "module.count": { "unit": "count", "semantics": "absolute" },
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per named AppDomain: modules loaded and the shallow bytes of the live instances of the types they declare (the Estimated Managed Bytes of the AppDomain inventory). Added with the AppDomain entity (M2c step 7).",
+      "addedIn": "1.96.0"
+    },
+    "thread.appdomain-population": {
+      "producedBy": "ThreadAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/ThreadAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": "appdomain",
+      "temporalKind": "point",
+      "measures": {
+        "thread.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per named AppDomain that has threads, counted over every thread (alive or not). Threads with no AppDomain are not counted under any domain. Added with the AppDomain entity (M2c step 7).",
+      "addedIn": "1.96.0"
     },
     "runtime.active-exception": {
       "producedBy": "CrashAnalyzer",

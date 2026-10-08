@@ -15,6 +15,12 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation.schema.json` and `observation-type-registry.json` 1.96.0 — 2026-10-08
+
+M2c step 7: a new subject kind, `appdomain` (`$kind: "appdomain"`, `kind: "AppDomain"`, `name`, optional `domainId`; the join key is the
+name). Two new observation types use it: `runtime.appdomain-footprint` (`module.count`, `shallow.bytes`) and
+`thread.appdomain-population` (`thread.count`). Additive: consumers that ignore unknown subject kinds are unaffected. No `direction`.
+
 ## `observation-type-registry.json` 1.93.0 — 2026-09-27
 
 Phase 5 exit criterion (section builders presentation-only): section confidence badges are now

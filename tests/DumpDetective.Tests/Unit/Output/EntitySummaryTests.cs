@@ -68,6 +68,8 @@ public sealed class EntitySummaryTests : IDisposable
     [InlineData("runtime.module-conflict-group", "Identity")]
     [InlineData("runtime.module-cross-domain-load", "Identity")]
     [InlineData("runtime.module-assemblyref-mismatch", "Identity")]
+    [InlineData("runtime.appdomain-footprint", "Footprint")]
+    [InlineData("thread.appdomain-population", "Activity")]
     [InlineData("runtime.no-such-fact", "Other")]
     public void PanelFor_PlacesModuleFactsInTheirOwnPanels(string factKind, string expectedPanel) =>
         EntityFactPanels.PanelFor(factKind).Should().Be(expectedPanel);

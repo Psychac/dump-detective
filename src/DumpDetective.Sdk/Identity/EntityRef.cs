@@ -27,6 +27,7 @@ namespace DumpDetective.Sdk.Identity;
 [JsonDerivedType(typeof(ModuleRef), "module")]
 [JsonDerivedType(typeof(ThreadRef), "thread")]
 [JsonDerivedType(typeof(ObjectRef), "object")]
+[JsonDerivedType(typeof(AppDomainRef), "appdomain")]
 public abstract record EntityRef
 {
     public abstract EntityKind Kind { get; }

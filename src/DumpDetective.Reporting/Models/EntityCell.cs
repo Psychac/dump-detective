@@ -12,6 +12,7 @@ internal static class EntityColumn
     public const string Module = TypePrefix + "module";
     public const string Method = TypePrefix + "method";
     public const string Object = TypePrefix + "object";
+    public const string AppDomain = TypePrefix + "appdomain";
 
     // A method is keyed "<declaring type>::<name>" but its column shows only the name, so the declaring type comes from another
     // column of the same row: the entity:type column with this header.
@@ -27,6 +28,7 @@ internal static class EntityColumn
         Module => EntityKind.Module,
         Method => EntityKind.Method,
         Object => EntityKind.Object,
+        AppDomain => EntityKind.AppDomain,
         _ => throw new ArgumentException($"Not an entity column: {header.Type}", nameof(header)),
     };
 }

@@ -190,6 +190,7 @@ function expectedEntityPanels(kind) {
     case 'thread': return ENTITY_THREAD_PANELS;
     case 'module': return ['Footprint'];
     case 'method': return ['Exceptions and async'];
+    case 'appdomain': return ['Footprint'];
     default: return [];
   }
 }

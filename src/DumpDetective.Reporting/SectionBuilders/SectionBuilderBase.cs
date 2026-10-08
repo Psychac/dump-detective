@@ -77,6 +77,10 @@ internal abstract class SectionBuilderBase
     protected static CompactHeader CHModule(string name, bool sortable = true)
         => new(name, EntityColumn.Module, null, sortable);
 
+    // AppDomain columns link by domain name, the identity a dump's module inventory and thread list share.
+    protected static CompactHeader CHAppDomain(string name, bool sortable = true)
+        => new(name, EntityColumn.AppDomain, null, sortable);
+
     // Object columns show a bare "0x..." address; the entity's key also names the dump, so the pass matches on the address alone.
     protected static CompactHeader CHObject(string name, bool sortable = true)
         => new(name, EntityColumn.Object, null, sortable);

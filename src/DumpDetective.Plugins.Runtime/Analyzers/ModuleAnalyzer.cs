@@ -172,6 +172,34 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             }, cancellationToken);
         }
 
+        foreach (AppDomainSnapshot domain in result.Domains ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(domain.Name))
+                continue;
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.appdomain-footprint",
+                Subjects = [new AppDomainRef { Name = domain.Name, DomainId = domain.DomainId, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["module.count"] = new Measure(domain.ModuleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(domain.EstimatedManagedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Module Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
         await context.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),

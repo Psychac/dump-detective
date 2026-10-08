@@ -215,3 +215,29 @@ test('object page is titled by its address, not the dump path, and round-trips t
   assert.ok(page.headings.includes('Size and population'));
   assert.doesNotMatch(page.text, /No facts were reported for/);
 });
+
+const appDomainEntity = { id: 0, kind: 'AppDomain', joinKey: '/LM/W3SVC/1/ROOT-2-134187409034415175', fidelity: 'High', details: [] };
+
+test('appdomain cell shows the domain name and links to its page', function () {
+  entities.setEntityData(documentWith(appDomainEntity, [], []));
+  const cell = new FakeNode('td');
+  entities.decorateEntityCell(cell, 0, appDomainEntity.joinKey);
+  const link = cell.children[0];
+  assert.equal(link.textContent, appDomainEntity.joinKey);
+  assert.equal(link.href, '#entity/appdomain/' + encodeURIComponent(appDomainEntity.joinKey));
+});
+
+test('appdomain page is titled by the name, shows Footprint and Activity, and expects Footprint', function () {
+  const kinds = [fact('runtime.appdomain-footprint', 'Footprint'), fact('thread.appdomain-population', 'Activity')];
+  const page = openPage(appDomainEntity, kinds, [[0, 1, []], [1, 1, []]]);
+  const panel = document.body.children.find(function (child) { return child.tag === 'aside'; });
+  assert.equal(panel._parts.title.textContent, appDomainEntity.joinKey);
+  assert.equal(panel._parts.kind.textContent, 'appdomain');
+  assert.deepEqual(page.headings.filter(function (h) { return h === 'Footprint' || h === 'Activity'; }), ['Footprint', 'Activity']);
+  assert.doesNotMatch(page.text, /No facts were reported for/);
+});
+
+test('appdomain page with no footprint fact says so', function () {
+  const page = openPage(appDomainEntity, [], []);
+  assert.match(page.text, /No facts were reported for: Footprint\./);
+});

@@ -83,9 +83,25 @@ mechanics already exist for types and threads; this milestone extends them to th
    - **Tests:** 3 `EntityCellTests` (address match and case, unknown/placeholder text, shared address), harness 17 of 17 (2 new); entity suites 133 passed.
    - **Real dump:** all 55 object entities reached by a link (55 cells in each table), text unchanged, entity table and summary identical, 0 warnings. Results: `m2-step1/verify-m2c6-results.txt`.
    - **Not done:** other address columns (~26) stay text until an analyzer names those objects as entities.
-7. **Remaining kinds** *(pending, per D4)* — GC root, handle, memory segment, AppDomain, one at a time.
+7. **Remaining kinds** *(measured 2026-10-08; per D4 one kind at a time; AppDomain done, others pending)*
+   - **Measured on the reference dump** (columns and facts only; no analyzer names any of these as a subject today):
 
-Each step is verified on the reference dump, one run at a time, in the same way as M2.
+     | Kind | Where it appears | Facts that concern it | Order |
+     |---|---|---|---|
+     | AppDomain | 2 domains (name, id, address, module count, bytes) in Module "AppDomain inventory" and Thread "AppDomain thread distribution" | none as subject; module cross-domain-load facts name modules only | **1st** |
+     | GC root | 1,404 rows ("Top GC roots by severity": root kind, root address, target) plus root-kind columns in 5 more tables | `heap.root` has the *target type* as its only subject | 2nd, decide with handle |
+     | GC handle | "Handle Kind" in 4 GC Handle tables; the "Address" there is the pinned *target*, not the handle (it equals "Target Addr" in the root table) | `handle.pinned`, `weakhandle.target`, `handle.refcounted-target`: all subject = the target type | merge into GC root, or defer |
+     | Memory segment | 8 segments in 3 Heap Topology / LOH tables | none | last, or drop |
+
+   - **Why this order:** AppDomain is the smallest (2 entities) and already joins three tables, so it is the cheapest first test of a new kind end to end. Pinned and strong handles are also GC roots (the first rows of the root table are both), so a separate handle kind would duplicate roots. Segments have no facts, so a page would show only an identity.
+   - **Cost per kind (D4):** SDK subtype and JSON tag, an analyzer that emits it as a subject, `EntityKind`, table columns, panels, validator and harness cases.
+   - **7a. AppDomain** *(done 2026-10-08, verified on reference dump)*
+     - **SDK:** `AppDomainRef` (identity = name; the domain id is a dump-local handle), `EntityKind.AppDomain` (appended last, so no existing entity id moves), `$kind: "appdomain"` in `observation.schema.json`; registry 1.96.0 and a changelog entry.
+     - **Facts (new):** `runtime.appdomain-footprint` from `ModuleAnalyzer` (`module.count`, `shallow.bytes`; unnamed domains are skipped, D3) and `thread.appdomain-population` from `ThreadAnalyzer` (`thread.count`; threads with no domain are not counted under any). Panels: Footprint and Activity; `module.count` and `thread.count` added to the summable measures.
+     - **Columns:** `EntityColumn.AppDomain` on Module "AppDomain inventory / Domain Name" (no longer truncated to 60 characters) and Thread "AppDomain thread distribution / AppDomain".
+     - **Tests:** one analyzer test in each of `ModuleAnalyzer` and `ThreadAnalyzer` characterization suites, 2 `EntityCellTests`, 2 panel-mapping cases, registry conformance; harness 20 of 20 (3 new); 150 passed.
+     - **Real dump:** 2 AppDomain entities (ids 14588-14589, after every existing entity; existing entities and all 14,588 summary rows identical once names are resolved), each with a Footprint and an Activity fact; both domain tables link 2 of 2, text unchanged; claims and findings identical (observation GUIDs differ per run); 0 warnings. Results: `m2-step1/verify-m2c7-results.txt`.
+     - **Not done:** a module-to-domain relation (relations are deferred M2b work); modules are not linked from the domain page.
 
 ## Open questions
 

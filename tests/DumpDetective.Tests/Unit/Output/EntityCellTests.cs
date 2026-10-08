@@ -253,6 +253,40 @@ public sealed class EntityCellTests
         FirstRow(EntityCellPass.Apply(ObjectDocument("0x1E101A03098") with { Entities = entities })).Values[0].Should().Be("0x1E101A03098");
     }
 
+    [Fact]
+    public void Apply_AppDomainColumn_MatchesTheDomainName()
+    {
+        FirstRow(EntityCellPass.Apply(AppDomainDocument("DefaultDomain"))).Values[0].Should().Be(new EntityCell(0, null));
+        FirstRow(EntityCellPass.Apply(AppDomainDocument("/LM/W3SVC/1/ROOT-2-134187409034415175"))).Values[0].Should().Be(new EntityCell(1, null));
+    }
+
+    [Fact]
+    public void Apply_AppDomainColumn_LeavesUnknownEmptyAndPlaceholderCellsAsText()
+    {
+        foreach (string shown in new[] { "OtherDomain", "<No AppDomain>", "", "defaultdomain" })
+            FirstRow(EntityCellPass.Apply(AppDomainDocument(shown))).Values[0].Should().Be(shown);
+    }
+
+    private static AnalysisReportDocument AppDomainDocument(string shown)
+    {
+        var table = new CompactTable(
+            "AppDomain thread distribution",
+            [new CompactHeader("AppDomain", EntityColumn.AppDomain), new CompactHeader("Thread Count", "number")],
+            [new CompactRow([shown, 4L])]);
+        var section = new AnalyzerDetailSection("Thread Analysis", "Threads", 0, []) { CompactTables = [table] };
+        return new SingleDumpReportDocument
+        {
+            DumpPath = "C:/dumps/Crash.dmp",
+            Domains = [new ReportDomainSection("Threads", null, [section], [])],
+            Entities =
+            [
+                new EntityRecord(0, EntityKind.AppDomain, "DefaultDomain", MatchFidelity.Exact),
+                new EntityRecord(1, EntityKind.AppDomain, "/LM/W3SVC/1/ROOT-2-134187409034415175", MatchFidelity.Exact),
+                new EntityRecord(2, EntityKind.Module, "OtherDomain", MatchFidelity.Exact),
+            ],
+        };
+    }
+
     private static AnalysisReportDocument ObjectDocument(string shown)
     {
         var table = new CompactTable(

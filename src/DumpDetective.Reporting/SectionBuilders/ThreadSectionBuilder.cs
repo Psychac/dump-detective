@@ -205,7 +205,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             var appRows = new List<TableRow>(d.AppDomainDistribution.Count);
             foreach (var kvp in d.AppDomainDistribution)
                 appRows.Add(new TableRow([Cell(kvp.Key), Cell($"{kvp.Value:N0}", kvp.Value)]));
-            compactTables.Add(STCompact("AppDomain thread distribution", new[] { CH("AppDomain"), CH("Thread Count","number") }, appRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("AppDomain thread distribution", new[] { CHAppDomain("AppDomain"), CH("Thread Count","number") }, appRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(

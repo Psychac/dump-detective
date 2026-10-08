@@ -11,4 +11,5 @@ public enum EntityKind
     Module,
     Thread,
     Object,
+    AppDomain,
 }

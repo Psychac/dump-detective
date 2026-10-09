@@ -408,7 +408,7 @@ function entityRelations(entity) {
     section.appendChild(entityNote('Nothing else in this report appears alongside this one.'));
     return section;
   }
-  section.appendChild(entityNote('Appears with: seen in the same table row. This does not say that one holds or retains the other.'));
+  section.appendChild(entityNote('Appears with: seen in the same table row, or as two subjects of one fact. This does not say that one holds or retains the other.'));
   const byKind = new Map();
   for (const neighbour of neighbours) {
     const other = _entityTable && _entityTable[neighbour.id];
@@ -428,7 +428,7 @@ function entityRelationGroup(kind, items) {
     return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
   });
   const sources = (_entityRelations && _entityRelations.sources) || [];
-  const sourceNames = function (item) { return item.sources.map(function (index) { return sources[index] || String(index); }).join(', '); };
+  const sourceNames = function (item) { return item.sources.map(function (index) { return entityRelationSourceLabel(sources[index] || String(index)); }).join(', '); };
   const sharedSource = sourceNames(items[0]);
   const allShare = items.every(function (item) { return sourceNames(item) === sharedSource; });
 
@@ -453,6 +453,11 @@ function entityRelationGroup(kind, items) {
     });
   }
   return group;
+}
+
+// A source is a table ("Analyzer / Table title") or a fact kind, written with a "fact: " prefix by the tool.
+function entityRelationSourceLabel(source) {
+  return source.startsWith('fact: ') ? 'fact ' + source.slice(6) : source;
 }
 
 function entityRelationItem(item, sourceText) {

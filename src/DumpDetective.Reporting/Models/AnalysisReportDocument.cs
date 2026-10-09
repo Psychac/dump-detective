@@ -113,8 +113,8 @@ internal abstract record AnalysisReportDocument
     public EntitySummary? EntitySummary { get; init; } = null;
 
     /// <summary>
-    /// Pairs of entities that appear together in a table row, with where each was seen. Built when the document is rendered, from the
-    /// rewritten tables (see <c>EntityCellPass</c>), so it is null on the in-memory document and set on what is written.
+    /// Pairs of entities that appear together, with where each was seen. The writer sets the pairs that share an observation; the
+    /// pairs that share a table row are added when the document is rendered, from the rewritten tables (see <c>EntityCellPass</c>).
     /// </summary>
     public EntityRelations? Relations { get; init; } = null;
 

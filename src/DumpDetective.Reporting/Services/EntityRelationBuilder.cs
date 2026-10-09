@@ -1,23 +1,28 @@
 using DumpDetective.Reporting.Models;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
 
 namespace DumpDetective.Reporting.Services;
 
 /// <summary>
-/// Reads relations off tables that have already been rewritten by <see cref="EntityCellPass"/>: two entity cells in one row are
-/// related by the table's own definition. It runs on the rewritten rows so the list cannot disagree with the links a reader sees
-/// (m2b-relations-plan.md, D2 and D5).
+/// Pairs of entities that appear together (docs/ReportStructure/m2b-relations-plan.md, steps 1-2). Two sources:
+/// <list type="bullet">
+/// <item>two entity cells in one row of a table, read off rows <see cref="EntityCellPass"/> has already rewritten so the list cannot
+/// disagree with the links a reader sees (D5);</item>
+/// <item>two subjects of one observation, named by its fact kind, which is exact where a row only says the two were shown together.</item>
+/// </list>
+/// A pair seen both ways keeps only its fact source (D2).
 /// </summary>
 internal static class EntityRelationBuilder
 {
-    public static EntityRelations? Build(IReadOnlyList<ReportDomainSection>? domains)
+    public const string FactSourcePrefix = "fact: ";
+
+    public static EntityRelations? FromTables(IReadOnlyList<ReportDomainSection>? domains)
     {
         if (domains is null)
             return null;
 
-        var sourceIndexByName = new Dictionary<string, int>(StringComparer.Ordinal);
-        var sources = new List<string>();
-        var sourcesByPair = new Dictionary<(int First, int Second), SortedSet<int>>();
-
+        var pairs = new PairSet();
         foreach (ReportDomainSection domain in domains)
         {
             foreach (AnalyzerDetailSection section in domain.Sections)
@@ -26,24 +31,80 @@ internal static class EntityRelationBuilder
                     continue;
 
                 foreach (CompactTable table in section.CompactTables)
-                    CollectTable(section.AnalyzerName, table, sourceIndexByName, sources, sourcesByPair);
+                    CollectTable(section.AnalyzerName, table, pairs);
             }
         }
 
-        if (sourcesByPair.Count == 0)
-            return null;
-
-        var pairs = new List<EntityRelation>(sourcesByPair.Count);
-        foreach (KeyValuePair<(int First, int Second), SortedSet<int>> pair in sourcesByPair)
-            pairs.Add(new EntityRelation(pair.Key.First, pair.Key.Second, [.. pair.Value]));
-
-        pairs.Sort(static (a, b) => a.First != b.First ? a.First.CompareTo(b.First) : a.Second.CompareTo(b.Second));
-        return new EntityRelations(sources, pairs);
+        return pairs.ToRelations();
     }
 
-    private static void CollectTable(
-        string analyzer, CompactTable table, Dictionary<string, int> sourceIndexByName, List<string> sources,
-        Dictionary<(int First, int Second), SortedSet<int>> sourcesByPair)
+    public static EntityRelations? FromFacts(IReadOnlyList<Observation> observations, IReadOnlyList<EntityRecord> entities)
+    {
+        var entityIdByKey = new Dictionary<(EntityKind Kind, string JoinKey), int>(entities.Count);
+        foreach (EntityRecord entity in entities)
+            entityIdByKey[(entity.Kind, entity.JoinKey)] = entity.Id;
+
+        var pairs = new PairSet();
+        var idsInFact = new List<int>(2);
+        for (int i = 0; i < observations.Count; i++)
+        {
+            IReadOnlyList<EntityRef> subjects = observations[i].Subjects;
+            if (subjects.Count < 2)
+                continue;
+
+            idsInFact.Clear();
+            foreach (EntityRef subject in subjects)
+            {
+                if (entityIdByKey.TryGetValue((subject.Kind, subject.JoinKey), out int id) && !idsInFact.Contains(id))
+                    idsInFact.Add(id);
+            }
+
+            AddAllPairs(idsInFact, FactSourcePrefix + observations[i].ObservationType, pairs);
+        }
+
+        return pairs.ToRelations();
+    }
+
+    /// <summary>
+    /// Fact pairs win over row pairs for the same two entities. Only the fact sources of <paramref name="existing"/> are kept, so
+    /// merging a document that was already merged gives the same result.
+    /// </summary>
+    public static EntityRelations? Merge(EntityRelations? existing, EntityRelations? fromTables)
+    {
+        var merged = new PairSet();
+        var factPairs = new HashSet<(int First, int Second)>();
+        if (existing is not null)
+        {
+            foreach (EntityRelation pair in existing.Pairs)
+            {
+                foreach (int sourceIndex in pair.SourceIndexes)
+                {
+                    string source = existing.Sources[sourceIndex];
+                    if (!source.StartsWith(FactSourcePrefix, StringComparison.Ordinal))
+                        continue;
+
+                    merged.Add(pair.First, pair.Second, source);
+                    factPairs.Add((pair.First, pair.Second));
+                }
+            }
+        }
+
+        if (fromTables is not null)
+        {
+            foreach (EntityRelation pair in fromTables.Pairs)
+            {
+                if (factPairs.Contains((pair.First, pair.Second)))
+                    continue;
+
+                foreach (int sourceIndex in pair.SourceIndexes)
+                    merged.Add(pair.First, pair.Second, fromTables.Sources[sourceIndex]);
+            }
+        }
+
+        return merged.ToRelations();
+    }
+
+    private static void CollectTable(string analyzer, CompactTable table, PairSet pairs)
     {
         var entityColumns = new List<int>();
         for (int column = 0; column < table.Headers.Count; column++)
@@ -56,7 +117,6 @@ internal static class EntityRelationBuilder
             return;
 
         string sourceName = $"{analyzer} / {table.Title}";
-        int sourceIndex = -1;
         var idsInRow = new List<int>(entityColumns.Count);
         foreach (CompactRow row in table.Rows)
         {
@@ -67,34 +127,62 @@ internal static class EntityRelationBuilder
                     idsInRow.Add(cell.Id);
             }
 
-            for (int i = 0; i < idsInRow.Count; i++)
+            AddAllPairs(idsInRow, sourceName, pairs);
+        }
+    }
+
+    private static void AddAllPairs(List<int> ids, string source, PairSet pairs)
+    {
+        for (int i = 0; i < ids.Count; i++)
+        {
+            for (int j = i + 1; j < ids.Count; j++)
             {
-                for (int j = i + 1; j < idsInRow.Count; j++)
-                {
-                    if (idsInRow[i] == idsInRow[j])
-                        continue;
-
-                    if (sourceIndex < 0)
-                        sourceIndex = SourceIndex(sourceName, sourceIndexByName, sources);
-
-                    var key = (Math.Min(idsInRow[i], idsInRow[j]), Math.Max(idsInRow[i], idsInRow[j]));
-                    if (!sourcesByPair.TryGetValue(key, out SortedSet<int>? seenIn))
-                        sourcesByPair[key] = seenIn = [];
-                    seenIn.Add(sourceIndex);
-                }
+                if (ids[i] != ids[j])
+                    pairs.Add(ids[i], ids[j], source);
             }
         }
     }
 
-    // A table that relates nothing (no row has two entity cells) is never listed as a source.
-    private static int SourceIndex(string name, Dictionary<string, int> sourceIndexByName, List<string> sources)
+    // A source is only listed once a pair uses it, so a table that relates nothing never appears. Sources are sorted by name on the
+    // way out, so two runs over the same input write the same list whatever order the observations arrived in.
+    private sealed class PairSet
     {
-        if (sourceIndexByName.TryGetValue(name, out int index))
-            return index;
+        private readonly Dictionary<(int First, int Second), HashSet<string>> _sourcesByPair = [];
 
-        index = sources.Count;
-        sources.Add(name);
-        sourceIndexByName[name] = index;
-        return index;
+        public void Add(int a, int b, string source)
+        {
+            var key = (Math.Min(a, b), Math.Max(a, b));
+            if (!_sourcesByPair.TryGetValue(key, out HashSet<string>? seenIn))
+                _sourcesByPair[key] = seenIn = new HashSet<string>(StringComparer.Ordinal);
+            seenIn.Add(source);
+        }
+
+        public EntityRelations? ToRelations()
+        {
+            if (_sourcesByPair.Count == 0)
+                return null;
+
+            var allSources = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (HashSet<string> seenIn in _sourcesByPair.Values)
+                allSources.UnionWith(seenIn);
+
+            var sources = new List<string>(allSources);
+            var indexByName = new Dictionary<string, int>(sources.Count, StringComparer.Ordinal);
+            for (int i = 0; i < sources.Count; i++)
+                indexByName[sources[i]] = i;
+
+            var pairs = new List<EntityRelation>(_sourcesByPair.Count);
+            foreach (KeyValuePair<(int First, int Second), HashSet<string>> pair in _sourcesByPair)
+            {
+                var indexes = new List<int>(pair.Value.Count);
+                foreach (string source in pair.Value)
+                    indexes.Add(indexByName[source]);
+                indexes.Sort();
+                pairs.Add(new EntityRelation(pair.Key.First, pair.Key.Second, indexes));
+            }
+
+            pairs.Sort(static (a, b) => a.First != b.First ? a.First.CompareTo(b.First) : a.Second.CompareTo(b.Second));
+            return new EntityRelations(sources, pairs);
+        }
     }
 }

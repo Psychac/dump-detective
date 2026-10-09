@@ -321,7 +321,7 @@ test('groups follow kind order, and an entity seen in different tables shows eac
 
 test('relations are labelled as appears-with, never as retains or holds', function () {
   const page = openRelationsPage({ kind: 'Module', joinKey: 'a.dll' }, [{ kind: 'Type', joinKey: 'T' }], [[0, 1, [0]]], ['S / t']);
-  assert.match(page.text, /Appears with: seen in the same table row\./);
+  assert.match(page.text, /Appears with: seen in the same table row, or as two subjects of one fact\./);
   assert.match(page.text, /does not say that one holds or retains the other/);
 });
 
@@ -329,4 +329,17 @@ test('an entity with no relations says so', function () {
   const page = openRelationsPage({ kind: 'Module', joinKey: 'a.dll' }, [{ kind: 'Type', joinKey: 'T' }], [], []);
   assert.match(page.text, /Nothing else in this report appears alongside this one\./);
   assert.equal(page.groups.length, 0);
+});
+
+test('a fact source reads "in fact <kind>", beside table sources that stay as they are', function () {
+  const others = [{ kind: 'Type', joinKey: 'System.A' }, { kind: 'Type', joinKey: 'System.B' }];
+  const page = openRelationsPage({ kind: 'Method', joinKey: 'App.Foo::Run' }, others, [[0, 1, [0]], [0, 2, [1]]], ['Async / Top', 'fact: type.async-state-machine']);
+  const items = groupItems(page.groups[0]);
+  assert.equal(items[0].children[1].textContent, ' \u00b7 in Async / Top');
+  assert.equal(items[1].children[1].textContent, ' \u00b7 in fact type.async-state-machine');
+});
+
+test('a group whose every pair comes from one fact names the fact once on the group line', function () {
+  const page = openRelationsPage({ kind: 'Method', joinKey: 'App.Foo::Run' }, [{ kind: 'Type', joinKey: 'System.A' }], [[0, 1, [0]]], ['fact: type.async-state-machine']);
+  assert.equal(page.groups[0].children[0].textContent, 'Types (1) \u00b7 in fact type.async-state-machine');
 });

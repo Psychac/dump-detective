@@ -4,7 +4,7 @@ Follows [m2-entities-plan.md](m2-entities-plan.md) (D5, deferred) and [m2c-entit
 Tracked as milestone **M2b** in [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path). It fills the dossier's Relations
 slot, which today reads "Not built yet" (`entityRelations` in `report.renderers.entities.js`).
 
-**Status:** in progress. D1-D6 decided 2026-10-09; step 1 done 2026-10-09, steps 2-4 pending.
+**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-2 done 2026-10-09, steps 3-4 pending.
 
 ## Goal
 
@@ -56,10 +56,13 @@ and all of those already exist.
    - **Real dump:** 13,177 pairs and 11 sources, identical to the measurement; all pairs canonical; 13,233 of 14,590 entities have a neighbour (largest: mscorlib.dll 5,307, System.Data.Entity.dll 3,031, System.Core.dll 753); report.json +224 KB, HTML +50 KB; entity table, summary and claims identical; 0 warnings. Spot checks: thread 24088 lists `System.IndexOutOfRangeException`, method `PortableTimer::OnTick` lists its declaring type, the first object lists `SqlConnection`. Results: `m2-step1/verify-m2b1-results.txt`.
    - **Not run-identical, not caused by this step:** the String Analysis "Types by string field ownership" values differ between runs (162.3, 166.1, 163.5 and 158.6 MB for the first row across four runs, three of them before any relations code). Not investigated here.
    - **Open question answered:** 13,167 of the 13,233 entities have exactly one neighbour (a type and its module), so single-entry groups are the common case. They are kept: it is the only link between a type page and its module page.
-2. **Relations from two-subject facts** *(pending)*
-   - **What:** the 64 existing two-subject facts, labelled by fact kind (D2), taking precedence over a row-based pair for the same two entities.
-   - **Where:** `EntitySummaryBuilder` already walks facts per entity, so the second subject is read there.
-   - **Check:** each fact-based pair also appears row-based where a table shows both, and nothing is shown twice.
+2. **Relations from two-subject facts** *(done 2026-10-09, verified on reference dump)*
+   - **How:** `EntityRelationBuilder.FromFacts` pairs every two subjects of an observation and names the pair `fact: <fact kind>`; `ReportOutputWriter` stores them on the document beside the entity table, and `EntityCellPass.Apply` merges them with the row pairs (`Merge`). A pair seen both ways keeps only its fact source (D2). Merging twice gives the same result.
+   - **Determinism:** sources are sorted by name when written, so the list does not depend on the order observations arrived in. This also re-orders the row sources of step 1 (names only).
+   - **Panel:** a fact source reads "in fact `type.async-state-machine`"; the note now says "seen in the same table row, or as two subjects of one fact".
+   - **Tests:** 8 more `EntityRelationBuilderTests` (pair named by fact kind, fewer than two known subjects ignored, three subjects give three pairs, arrival order, fact wins, merge idempotent, merge of nothing, `Apply` keeps writer pairs); harness 28 of 28 (2 new).
+   - **Real dump:** 62 pairs added (55 SQL transaction type to connection object, 7 method to state-machine type), 1 pair re-sourced to its facts (thread 24088 and `IndexOutOfRangeException`), 0 lost; 13,239 pairs, 13 sources; entity table, summary and claims identical; 0 warnings. Results: `m2-step1/verify-m2b2-results.txt`.
+   - **Found, not fixed:** the state-machine type in `type.async-state-machine` facts is the entity `OnTick`, not the full type. `EntityCanonicalizer`'s async-state-machine rule drops the declaring type, so `PortableTimer+<OnTick>d__8` and `PeriodicBatchingSink+<OnTick>d__16` are one Type entity and its page lists both methods. Pre-existing identity behaviour that relations make visible; changing it moves entity ids and trend identity, so it is a separate decision.
 3. **Linking facts: module to AppDomain, thread to AppDomain** *(pending)*
    - **Why separate:** the AppDomain tables hold modules and threads as text, so no row-based relation exists. `ModuleAnalyzer` already walks modules per domain.
    - **How:** new fact kinds with two subjects (module + AppDomain, thread + AppDomain) rather than changing the shape of existing facts, because existing insight rules read subjects by position. Registry, schema changelog and conformance test updated as in M2c step 7a.

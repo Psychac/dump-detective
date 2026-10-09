@@ -28,7 +28,7 @@ internal static class EntityCellPass
         foreach (ReportDomainSection domain in document.Domains)
             domains.Add(domain with { Sections = RewriteSections(domain.Sections, idsByKind) });
 
-        return document with { Domains = domains, Relations = EntityRelationBuilder.Build(domains) };
+        return document with { Domains = domains, Relations = EntityRelationBuilder.Merge(document.Relations, EntityRelationBuilder.FromTables(domains)) };
     }
 
     private static Dictionary<string, int> IdsByJoinKey(IReadOnlyList<EntityRecord> entities, EntityKind kind)

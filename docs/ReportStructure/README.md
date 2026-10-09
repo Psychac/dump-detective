@@ -23,7 +23,7 @@ states the disagreement explicitly in its §20.
 | Doc | Covers |
 |---|---|
 | [m1-claims-plan.md](m1-claims-plan.md) | vision § 19 step M1 (claims), with Phase 8's sinks and unconditional `report.json` folded in. **Done 2026-10-06** |
-| [m2b-relations-plan.md](m2b-relations-plan.md) | vision § 19 step M2b (relations): the dossier Relations panel, untyped entity relations first, typed ones later. **In progress**: step 1 (untyped relations from table rows) done 2026-10-09 |
+| [m2b-relations-plan.md](m2b-relations-plan.md) | vision § 19 step M2b (relations): the dossier Relations panel, untyped entity relations first, typed ones later. **In progress**: steps 1-2 (relations from table rows and from two-subject facts) done 2026-10-09 |
 | [m2c-entity-kinds-plan.md](m2c-entity-kinds-plan.md) | vision § 19 step M2c (more entity kinds): module, method, object and AppDomain pages. **Done 2026-10-09**; GC root, handle and memory segment not built, revisit with relations (M2b) |
 | [m2-entities-plan.md](m2-entities-plan.md) | vision § 19 step M2 (entities): entity table, entity-typed columns, per-entity summary, type and thread page. **Done 2026-10-08**; relations (M2b) and more entity kinds (M2c) deferred |
 

@@ -4,7 +4,7 @@ Follows [m2-entities-plan.md](m2-entities-plan.md) (shipped 2026-10-08). Tracked
 [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path). The panel, summary and cell
 mechanics already exist for types and threads; this milestone extends them to the other kinds.
 
-**Status:** draft 2026-10-08, nothing built. D1-D4 decided 2026-10-08.
+**Status:** done 2026-10-09. D1-D4 decided 2026-10-08; module, method, object and AppDomain pages built, GC root, handle and memory segment deliberately not (step 7).
 
 ## Starting point (measured on the 3.35 GB reference dump, 2026-10-08)
 
@@ -83,7 +83,7 @@ mechanics already exist for types and threads; this milestone extends them to th
    - **Tests:** 3 `EntityCellTests` (address match and case, unknown/placeholder text, shared address), harness 17 of 17 (2 new); entity suites 133 passed.
    - **Real dump:** all 55 object entities reached by a link (55 cells in each table), text unchanged, entity table and summary identical, 0 warnings. Results: `m2-step1/verify-m2c6-results.txt`.
    - **Not done:** other address columns (~26) stay text until an analyzer names those objects as entities.
-7. **Remaining kinds** *(measured 2026-10-08; per D4 one kind at a time; AppDomain done, others pending)*
+7. **Remaining kinds** *(closed 2026-10-09: AppDomain built; GC root, handle and memory segment measured and deliberately not built)*
    - **Measured on the reference dump** (columns and facts only; no analyzer names any of these as a subject today):
 
      | Kind | Where it appears | Facts that concern it | Order |
@@ -94,6 +94,15 @@ mechanics already exist for types and threads; this milestone extends them to th
      | Memory segment | 8 segments in 3 Heap Topology / LOH tables | none | last, or drop |
 
    - **Why this order:** AppDomain is the smallest (2 entities) and already joins three tables, so it is the cheapest first test of a new kind end to end. Pinned and strong handles are also GC roots (the first rows of the root table are both), so a separate handle kind would duplicate roots. Segments have no facts, so a page would show only an identity.
+   - **7b. GC root, handle, memory segment: not built, decided 2026-10-09** (measured on the reference dump only)
+     - **Population:** 1,411 roots; the table lists 1,404 (7 dropped for a zero estimate), so it is the full set, not a top-N. Kinds: Stack 964, StrongHandle 395, PinnedHandle 26, AsyncPinnedHandle 11, SizedRefHandle 8.
+     - **Identity is weak for 18%:** 260 stack roots have root address `0x0`, so (kind, address) cannot tell them apart; the other 1,145 are unique by (kind, address). A stack root's address is a stack slot, meaningful only inside this dump. The "Field" column is empty on every row.
+     - **A page would add nothing:** a root's facts (`heap.root`: retained bytes, kind, subgraph size) are the same values as its table row, and one root maps to one target. The 1,404 facts already sit on 189 type pages (Retention panel). One claim cites roots ("GC roots retaining large object sub-graphs"), and it already links through those types.
+     - **Cost:** about 1,145 new entities (+8% on the entity table), a new SDK subtype, and a change to `GCRootAnalyzer`'s subjects, which feed the existing insight rule.
+     - **Handles:** the 440 handle rows are a subset of the same roots, and the GC Handle tables' "Address" is the pinned target, not the handle, so a separate handle kind would have no handle address to key on there.
+     - **Memory segments:** 8 on this dump, no facts at all, so a page would show only an identity.
+     - **Why this holds beyond one dump:** no analyzer emits a segment fact; the handle tables show the pinned target, not the handle; a root address is dump-local, so roots gain nothing from cross-dump matching. The 0x0 share, the page-duplicates-the-row finding and the entity count were measured on this dump only. A second dump (the 25 GB hang dump, about 25 minutes) was judged not worth the run.
+     - **Revisit when:** claim relations (deferred M2b) exist, or a real dump needs a root or segment page. Adding a kind later is additive (the enum value goes last, no existing entity id moves), so deferring costs nothing.
    - **Cost per kind (D4):** SDK subtype and JSON tag, an analyzer that emits it as a subject, `EntityKind`, table columns, panels, validator and harness cases.
    - **7a. AppDomain** *(done 2026-10-08, verified on reference dump)*
      - **SDK:** `AppDomainRef` (identity = name; the domain id is a dump-local handle), `EntityKind.AppDomain` (appended last, so no existing entity id moves), `$kind: "appdomain"` in `observation.schema.json`; registry 1.96.0 and a changelog entry.

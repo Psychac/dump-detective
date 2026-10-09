@@ -21,6 +21,10 @@ internal sealed class DataTableLifecycleInsightRule : ISynthesisRule
     private const long DataColumnFinalizerThreshold = 100;
     private const long DataRowHeapThreshold = 10_000;
 
+    // Exact, not a substring: DataRowView, DataRowCollection and compiler-generated types that merely mention DataRow (for example
+    // Enumerable+<CastIterator>d__<System.Data.DataRow>) are not rows.
+    private const string DataRowTypeName = "System.Data.DataRow";
+
     public string RuleId => "insight.datatable-lifecycle";
     public int Version => 1;
 
@@ -74,7 +78,7 @@ internal sealed class DataTableLifecycleInsightRule : ISynthesisRule
                 }
                 case "type.known-pattern-population":
                 {
-                    if (typeName.Contains("DataRow", StringComparison.OrdinalIgnoreCase))
+                    if (typeName == DataRowTypeName)
                     {
                         dataRowHeap += (long)observation.Measures["instance.count"].Value;
                         derivedFrom.Add(observation.Id);

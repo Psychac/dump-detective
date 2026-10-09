@@ -363,6 +363,19 @@ public sealed class InsightCorrelationRulesTests
             findings[0].Narrative.Should().Contain("DataRow ×15,000");
         }
 
+        [Theory]
+        [InlineData("System.Data.DataRowView")]
+        [InlineData("System.Data.DataRowCollection")]
+        [InlineData("System.Linq.Enumerable+<CastIterator>d__<System.Data.DataRow>")]
+        public async Task DataRowHeap_CountsOnlyTheRealDataRowType(string lookalike)
+        {
+            var matched = new ObservationMatchSet([KnownPattern(lookalike, count: 15_000)]);
+
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+
         [Fact]
         public async Task BelowBothThresholds_ReturnsEmpty()
         {

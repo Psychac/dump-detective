@@ -50,13 +50,30 @@ public sealed class EntityCanonicalizerTests
     }
 
     [Fact]
-    public void CanonicalizeTypeName_AsyncStateMachine_UnwrapsToDeclaringMethodAtHighFidelity()
+    public void CanonicalizeTypeName_AsyncStateMachine_DropsOnlyTheOrdinalAtHighFidelity()
     {
         var (canonical, fidelity) = EntityCanonicalizer.CanonicalizeTypeName(
             "MyNamespace.MyClass+<DoWorkAsync>d__12");
 
-        canonical.Should().Be("DoWorkAsync");
+        canonical.Should().Be("MyNamespace.MyClass+<DoWorkAsync>d__");
         fidelity.Should().Be(MatchFidelity.High);
+    }
+
+    [Fact]
+    public void CanonicalizeTypeName_AsyncStateMachine_SameMethodNameOnDifferentTypes_StaysDistinct()
+    {
+        var (timer, _) = EntityCanonicalizer.CanonicalizeTypeName("Serilog.PortableTimer+<OnTick>d__8");
+        var (sink, _) = EntityCanonicalizer.CanonicalizeTypeName("Serilog.PeriodicBatchingSink+<OnTick>d__16");
+
+        timer.Should().NotBe(sink);
+    }
+
+    [Fact]
+    public void CanonicalizeTypeName_AsyncStateMachine_BareNestedNameAndGenericInstantiation()
+    {
+        EntityCanonicalizer.CanonicalizeTypeName("<Foo>d__12").CanonicalName.Should().Be("<Foo>d__");
+        EntityCanonicalizer.CanonicalizeTypeName("Ns.C+<GetAsync>d__5[[System.String, mscorlib]]").CanonicalName
+            .Should().StartWith("Ns.C+<GetAsync>d__").And.NotContain("d__5");
     }
 
     [Fact]

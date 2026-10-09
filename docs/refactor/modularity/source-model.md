@@ -197,7 +197,7 @@ sometimes lossy.
 | Generic definition vs instantiation | Kept distinct; instantiation joins to definition as a *parent* relation, not identity | **Exact** |
 | Array/pointer/byref | Suffix-normalized (`T[]`, `T[,]`, `T*`, `T&`) | **Exact** |
 | Method overloads | Name + normalized param type list (canonicalized recursively) | **Exact** |
-| Async state machine `<Foo>d__12` | Unwrapped to declaring method `Foo` + flagged as state machine | **High** (ordinal `12` is compile-order-dependent — don't join on it) |
+| Async state machine `Ns.C+<Foo>d__12` | Ordinal dropped, declaring type and method kept: `Ns.C+<Foo>d__` (a bare `<Foo>d__12` gives `<Foo>d__`) | **High** (ordinal `12` is compile-order-dependent — don't join on it). Changed 2026-10-09: it used to unwrap to the bare method name `Foo`, which merged the state machines of same-named methods on different types into one entity |
 | Lambda/closure `<>c__DisplayClass4_0` | Unwrapped to enclosing method where recoverable | **Low** — ordinals shift between builds; join only within one build |
 | Local function `<Foo>g__Bar\|3_1` | Unwrapped to `Foo` + local name `Bar` | **Medium** |
 | Anonymous type | Shape-based key (property names + types) | **Medium** |

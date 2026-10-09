@@ -40,7 +40,7 @@ public static class EntityCanonicalizer
     private static readonly Regex AsyncStateMachineOrdinal = new(@"(>d__)\d+", RegexOptions.Compiled);
     private static readonly Regex LambdaMethodOrdinal = new(@"(>b__)\d+", RegexOptions.Compiled);
     private static readonly Regex LocalFunctionOrdinal = new(@"(>g__[A-Za-z_][A-Za-z0-9_]*)\|\d+(_\d+)?", RegexOptions.Compiled);
-    private static readonly Regex AsyncStateMachineUnwrap = new(@"<(?<method>[^>]+)>d__\d+", RegexOptions.Compiled);
+    private static readonly Regex AsyncStateMachineShape = new(@"<[^>]+>d__\d+", RegexOptions.Compiled);
 
     /// <summary>
     /// Canonicalizes a type name (as reported by ClrMD or TraceEvent) into a join-comparable form
@@ -52,11 +52,11 @@ public static class EntityCanonicalizer
 
         string stripped = StripAssemblyQualification(rawName);
 
-        if (AsyncStateMachineUnwrap.Match(stripped) is { Success: true } unwrapMatch)
+        if (AsyncStateMachineShape.IsMatch(stripped))
         {
-            // Async state machine: unwrap to the declaring method name. The compiler-assigned
-            // ordinal is compile-order-dependent and deliberately excluded from the join key.
-            return (unwrapMatch.Groups["method"].Value, MatchFidelity.High);
+            // Async state machine: only the compiler-assigned ordinal is dropped, because it is compile-order-dependent. The declaring
+            // type stays: two classes can each have an async method of the same name, and they are different state machines.
+            return (AsyncStateMachineOrdinal.Replace(stripped, "$1"), MatchFidelity.High);
         }
 
         if (LocalFunctionOrdinal.IsMatch(stripped))

@@ -113,6 +113,12 @@ internal abstract record AnalysisReportDocument
     public EntitySummary? EntitySummary { get; init; } = null;
 
     /// <summary>
+    /// Pairs of entities that appear together in a table row, with where each was seen. Built when the document is rendered, from the
+    /// rewritten tables (see <c>EntityCellPass</c>), so it is null on the in-memory document and set on what is written.
+    /// </summary>
+    public EntityRelations? Relations { get; init; } = null;
+
+    /// <summary>
     /// Cross-table string pool for compact-table cells (docs/refactor/report-payload-size-reduction-design.md,
     /// F1). Populated only by the HTML renderer (<see cref="DumpDetective.Reporting.Formatters.ReportStringPool"/>); null for other
     /// formats. A string-typed table cell is unambiguous on the wire: a JSON string is a literal value, a

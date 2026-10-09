@@ -496,6 +496,12 @@ body.report-density-comfortable .table-collapse > summary {
 .entity-panel__paths { margin: 2px 0 0; padding-left: 18px; font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
 .entity-panel__path { margin: 0 0 2px; overflow-wrap: anywhere; }
 
+.entity-relations__group { margin: 8px 0 0; }
+.entity-relations__summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.entity-relations__list { margin: 4px 0 0; padding-left: 18px; font-size: 12px; max-height: 320px; overflow-y: auto; }
+.entity-relations__item { margin: 0 0 2px; overflow-wrap: anywhere; }
+.entity-relations__source { color: var(--text-muted); }
+
 .entity-claims { margin: 0; padding: 0; list-style: none; }
 .entity-claims__item { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 13px; line-height: 1.4; }
 .entity-claims__severity { flex: none; padding: 0 6px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em;

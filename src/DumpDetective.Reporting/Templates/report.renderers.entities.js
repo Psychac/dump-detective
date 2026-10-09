@@ -14,6 +14,8 @@ let _entitySummary = null;
 let _entityByKey = new Map();
 let _entityRowById = new Map();
 let _entityClaimById = new Map();
+let _entityRelations = null;
+let _entityNeighbours = new Map();
 let _entityPanelEl = null;
 let _entityReturnHash = '';
 let _entityOpenerEl = null;
@@ -24,6 +26,14 @@ export function setEntityData(doc) {
   _entityByKey = new Map();
   _entityRowById = new Map();
   _entityClaimById = new Map();
+  _entityRelations = (doc && doc.relations) || null;
+  _entityNeighbours = new Map();
+  if (_entityRelations && Array.isArray(_entityRelations.pairs)) {
+    for (const pair of _entityRelations.pairs) {
+      addEntityNeighbour(pair[0], pair[1], pair[2]);
+      addEntityNeighbour(pair[1], pair[0], pair[2]);
+    }
+  }
   if (_entityTable) {
     for (const entity of _entityTable) _entityByKey.set(entityKey(entity.kind, entity.joinKey), entity);
   }
@@ -33,6 +43,12 @@ export function setEntityData(doc) {
   const claims = [].concat((doc && doc.crossDomainInsights) || []);
   for (const domain of (doc && doc.domains) || []) claims.push(...(domain.domainInsights || []));
   for (const claim of claims) _entityClaimById.set(claim.id, claim);
+}
+
+// Each pair is stored once, lower id first; the page of either entity lists the other.
+function addEntityNeighbour(id, otherId, sourceIndexes) {
+  if (!_entityNeighbours.has(id)) _entityNeighbours.set(id, []);
+  _entityNeighbours.get(id).push({ id: otherId, sources: sourceIndexes });
 }
 
 function entityKey(kind, joinKey) {
@@ -176,7 +192,7 @@ function renderEntityBody(body, entity) {
   for (const panelName of ENTITY_PANEL_ORDER) {
     if (byPanel.has(panelName)) body.appendChild(entityFactPanel(panelName, byPanel.get(panelName)));
   }
-  body.appendChild(entityRelations());
+  body.appendChild(entityRelations(entity));
 
   const expected = expectedEntityPanels(entity.kind);
   const absent = expected.filter(function (name) { return !byPanel.has(name); });
@@ -378,11 +394,83 @@ function entityFormatValue(value, unit) {
   return entityFormatNumber(value);
 }
 
-function entityRelations() {
+const ENTITY_RELATION_KIND_ORDER = ['Type', 'Module', 'AppDomain', 'Thread', 'Method', 'Object'];
+const ENTITY_RELATION_KIND_LABEL = { Type: 'Types', Module: 'Modules', AppDomain: 'AppDomains', Thread: 'Threads', Method: 'Methods', Object: 'Objects' };
+// A group at or above this size starts collapsed and fills in when opened, so a module with thousands of types costs nothing until asked for.
+const ENTITY_RELATION_COLLAPSE_AT = 25;
+
+// "Appears with" is all a table row says: two entities in one row, not that one holds or retains the other (m2b-relations-plan.md, D2).
+function entityRelations(entity) {
   const section = el('section', 'entity-panel__section');
   section.appendChild(entityHeading('Relations'));
-  section.appendChild(entityNote('Not built yet. What holds this, and what it holds, will appear here once claims carry relations.'));
+  const neighbours = _entityNeighbours.get(entity.id) || [];
+  if (!neighbours.length) {
+    section.appendChild(entityNote('Nothing else in this report appears alongside this one.'));
+    return section;
+  }
+  section.appendChild(entityNote('Appears with: seen in the same table row. This does not say that one holds or retains the other.'));
+  const byKind = new Map();
+  for (const neighbour of neighbours) {
+    const other = _entityTable && _entityTable[neighbour.id];
+    if (!other) continue;
+    if (!byKind.has(other.kind)) byKind.set(other.kind, []);
+    byKind.get(other.kind).push({ entity: other, sources: neighbour.sources });
+  }
+  const kinds = ENTITY_RELATION_KIND_ORDER.filter(function (kind) { return byKind.has(kind); })
+    .concat(Array.from(byKind.keys()).filter(function (kind) { return !ENTITY_RELATION_KIND_ORDER.includes(kind); }));
+  for (const kind of kinds) section.appendChild(entityRelationGroup(kind, byKind.get(kind)));
   return section;
+}
+
+function entityRelationGroup(kind, items) {
+  items.sort(function (a, b) {
+    const nameA = entityRelationName(a.entity), nameB = entityRelationName(b.entity);
+    return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
+  });
+  const sources = (_entityRelations && _entityRelations.sources) || [];
+  const sourceNames = function (item) { return item.sources.map(function (index) { return sources[index] || String(index); }).join(', '); };
+  const sharedSource = sourceNames(items[0]);
+  const allShare = items.every(function (item) { return sourceNames(item) === sharedSource; });
+
+  const group = el('details', 'entity-relations__group');
+  const summary = el('summary', 'entity-relations__summary');
+  summary.textContent = (ENTITY_RELATION_KIND_LABEL[kind] || kind) + ' (' + items.length.toLocaleString('en-US') + ')'
+    + (allShare ? ' \u00b7 in ' + sharedSource : '');
+  group.appendChild(summary);
+  const list = el('ul', 'entity-relations__list');
+  group.appendChild(list);
+
+  const fill = function () {
+    for (const item of items) list.appendChild(entityRelationItem(item, allShare ? null : sourceNames(item)));
+  };
+  if (items.length < ENTITY_RELATION_COLLAPSE_AT) {
+    group.open = true;
+    fill();
+  } else {
+    let filled = false;
+    group.addEventListener('toggle', function () {
+      if (group.open && !filled) { filled = true; fill(); }
+    });
+  }
+  return group;
+}
+
+function entityRelationItem(item, sourceText) {
+  const row = el('li', 'entity-relations__item');
+  const link = el('a', 'entity-link');
+  link.href = entityHref(item.entity);
+  link.textContent = entityRelationName(item.entity);
+  row.appendChild(link);
+  if (sourceText) {
+    const source = el('span', 'entity-relations__source');
+    source.textContent = ' \u00b7 in ' + sourceText;
+    row.appendChild(source);
+  }
+  return row;
+}
+
+function entityRelationName(entity) {
+  return entityPageTitle({ kind: String(entity.kind).toLowerCase(), joinKey: entity.joinKey });
 }
 
 function entityHeading(text) {

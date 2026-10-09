@@ -4,7 +4,7 @@ Follows [m2-entities-plan.md](m2-entities-plan.md) (D5, deferred) and [m2c-entit
 Tracked as milestone **M2b** in [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path). It fills the dossier's Relations
 slot, which today reads "Not built yet" (`entityRelations` in `report.renderers.entities.js`).
 
-**Status:** draft 2026-10-09, nothing built. D1 decided 2026-10-09; D2-D6 proposed, awaiting a call.
+**Status:** in progress. D1-D6 decided 2026-10-09; step 1 done 2026-10-09, steps 2-4 pending.
 
 ## Goal
 
@@ -39,21 +39,23 @@ and all of those already exist.
 | # | Decision | Status |
 |---|---|---|
 | D1 | Entity relations and claim-to-claim relations are separate pieces | **Decided 2026-10-09.** They have different data sources and payoffs; claim relations need no new entity kinds. Only entity relations are planned here. |
-| D2 | A relation read from a table row is labelled "appears with" and names the table, never "holds" or "retains" | **Proposed.** A row says two entities appear together, not why. Keeps D5 of the M2 plan: relations are never faked from table text. A relation from a two-subject fact is labelled with its fact kind instead, and wins when both sources give the same pair. |
-| D3 | No cap on the relation list; large groups render collapsed | **Proposed.** The project forbids top-N sampling. A big module has thousands of types, so the panel groups by kind and uses the shared collapsible tree, with the full count in the group heading. |
-| D4 | Store each pair once, with a list of sources, and let the client derive both directions | **Proposed.** About 14,000 module-type pairs would otherwise be written twice. Payload cost is measured in step 1 before the shape is fixed. |
-| D5 | Compute row relations from the output of `EntityCellPass`, in the same place as the validator | **Proposed.** That pass is where cells resolve to entity ids, so the relation list cannot disagree with the links the reader sees. `report.json` and the HTML must carry the identical list. |
-| D6 | The panel is HTML-only, like the rest of the dossier | **Proposed.** Markdown and text keep showing tables. |
+| D2 | A relation read from a table row is labelled "appears with" and names the table, never "holds" or "retains" | **Decided 2026-10-09.** A row says two entities appear together, not why. Keeps D5 of the M2 plan: relations are never faked from table text. A relation from a two-subject fact is labelled with its fact kind instead, and wins when both sources give the same pair. |
+| D3 | No cap on the relation list; large groups render collapsed | **Decided 2026-10-09.** The project forbids top-N sampling. A big module has thousands of types, so the panel groups by kind and uses the shared collapsible tree, with the full count in the group heading. |
+| D4 | Store each pair once, with a list of sources, and let the client derive both directions | **Decided 2026-10-09.** About 14,000 module-type pairs would otherwise be written twice. Payload cost is measured in step 1 before the shape is fixed. |
+| D5 | Compute row relations from the output of `EntityCellPass`, in the same place as the validator | **Decided 2026-10-09.** That pass is where cells resolve to entity ids, so the relation list cannot disagree with the links the reader sees. `report.json` and the HTML must carry the identical list. |
+| D6 | The panel is HTML-only, like the rest of the dossier | **Decided 2026-10-09.** Markdown and text keep showing tables. |
 
 ## Steps
 
-1. **Untyped relations from table rows** *(pending)*
-   - **Measure first:** distinct pairs after de-duplication, bytes added to `report.json` and the HTML, and how many pairs repeat across tables. Fix the payload shape (D4) from that, not before.
-   - **Server:** a relations pass beside `EntityCellPass`; a `relations` list on the document (pairs of entity ids plus a source index) and a source list naming each table.
-   - **Validator:** every pair names two existing entities, pair order is canonical, every source index is in range, no entity is related to itself.
-   - **Panel:** replace the "Not built yet" note with grouped lists (by kind, then by source), collapsed past a size threshold (D3); each name links to its page.
-   - **Tests:** pass and validator unit tests; harness cases for grouping, collapse and an entity with no relations.
-   - **Real dump:** one run on the reference dump; compare entity table and summary against the previous run (must be identical), and spot-check one thread, one module, one method and one object page.
+1. **Untyped relations from table rows** *(done 2026-10-09, verified on reference dump)*
+   - **Measured first** (`m2-step1/m2b1-measure-results.txt`): 14,039 row co-occurrences are 13,177 distinct pairs from 11 tables; 436 pairs are seen in more than one table. Stored as `[first, second, [source...]]` they cost 223 KB, 0.3% of the 80.7 MB report, so D4 held and no client-side derivation was needed.
+   - **Server:** `EntityRelationBuilder` reads the rows `EntityCellPass` has rewritten; `Apply` attaches the result as `Relations` (a source list plus pairs, lower id first), so the HTML, `report.json` and the validator share one list (D5). The in-memory document is unchanged.
+   - **Validator:** `ValidateRelations` checks ids are inside the entity table, the pair is lower id first and not self-related, every pair names at least one source, every source index is in range.
+   - **Panel:** the "Not built yet" note is replaced by an "Appears with" note (D2) and one group per kind, in the order Type, Module, AppDomain, Thread, Method, Object. A group of 25 or more starts collapsed and fills in when opened (D3), so no neighbour is dropped. The source shows once on the group line when the whole group shares it, otherwise on each item.
+   - **Tests:** 5 `EntityRelationBuilderTests` (order, dedup with sources, text/self/single-column ignored, attached by `Apply`, validator); harness 26 of 26 (6 new: both directions, sorting, collapse and lazy fill, mixed sources, wording, empty).
+   - **Real dump:** 13,177 pairs and 11 sources, identical to the measurement; all pairs canonical; 13,233 of 14,590 entities have a neighbour (largest: mscorlib.dll 5,307, System.Data.Entity.dll 3,031, System.Core.dll 753); report.json +224 KB, HTML +50 KB; entity table, summary and claims identical; 0 warnings. Spot checks: thread 24088 lists `System.IndexOutOfRangeException`, method `PortableTimer::OnTick` lists its declaring type, the first object lists `SqlConnection`. Results: `m2-step1/verify-m2b1-results.txt`.
+   - **Not run-identical, not caused by this step:** the String Analysis "Types by string field ownership" values differ between runs (162.3, 166.1, 163.5 and 158.6 MB for the first row across four runs, three of them before any relations code). Not investigated here.
+   - **Open question answered:** 13,167 of the 13,233 entities have exactly one neighbour (a type and its module), so single-entry groups are the common case. They are kept: it is the only link between a type page and its module page.
 2. **Relations from two-subject facts** *(pending)*
    - **What:** the 64 existing two-subject facts, labelled by fact kind (D2), taking precedence over a row-based pair for the same two entities.
    - **Where:** `EntitySummaryBuilder` already walks facts per entity, so the second subject is read there.
@@ -77,8 +79,6 @@ and all of those already exist.
 
 ## Open questions
 
-- Payload cost of storing relations (step 1 measures it); if large, whether module-type pairs should be derived client-side from the existing Type table's module column instead of stored.
-- Whether "appears with" is useful for the 13,112 type pages whose only neighbour is their module, or whether the panel should hide a group with a single entry.
 - Whether a thread's or module's AppDomain should also become a column in the existing tables once step 3 exists.
 
 ## Not in this plan

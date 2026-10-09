@@ -20,7 +20,35 @@ internal static class EntityReferenceValidator
         CheckEntityAddresses(entities, problems);
         if (document.EntitySummary is { } summary)
             CheckSummary(summary, entities, document.Findings, problems);
-        CheckTableCells(EntityCellPass.Apply(document), entities, problems);
+        AnalysisReportDocument rewritten = EntityCellPass.Apply(document);
+        CheckTableCells(rewritten, entities, problems);
+        problems.AddRange(ValidateRelations(rewritten.Relations, entities));
+        return problems;
+    }
+
+    internal static IReadOnlyList<string> ValidateRelations(EntityRelations? relations, IReadOnlyList<EntityRecord> entities)
+    {
+        var problems = new List<string>();
+        if (relations is null)
+            return problems;
+
+        foreach (EntityRelation pair in relations.Pairs)
+        {
+            string pairText = $"Relation {pair.First}-{pair.Second}";
+            if (pair.First < 0 || pair.Second >= entities.Count)
+                problems.Add($"{pairText} names an entity outside the entity table ({entities.Count} rows).");
+            else if (pair.First >= pair.Second)
+                problems.Add($"{pairText} is not stored lower id first, or relates an entity to itself.");
+
+            if (pair.SourceIndexes.Count == 0)
+                problems.Add($"{pairText} does not say where the two entities were seen together.");
+            foreach (int sourceIndex in pair.SourceIndexes)
+            {
+                if (sourceIndex < 0 || sourceIndex >= relations.Sources.Count)
+                    problems.Add($"{pairText} lists source {sourceIndex}; only {relations.Sources.Count} sources are listed.");
+            }
+        }
+
         return problems;
     }
 

@@ -13,6 +13,8 @@ class FakeNode {
     this.attributes = {};
     this.dataset = {};
     this.hidden = false;
+    this.open = false;
+    this.handlers = {};
     this.className = '';
     this._text = null;
     const owner = this;
@@ -26,7 +28,8 @@ class FakeNode {
     return child;
   }
   setAttribute(name, value) { this.attributes[name] = value; }
-  addEventListener() { }
+  addEventListener(type, handler) { (this.handlers[type] = this.handlers[type] || []).push(handler); }
+  fire(type) { for (const handler of this.handlers[type] || []) handler(); }
   focus() { }
   get textContent() {
     if (this.tag === '#text') return this._text;
@@ -240,4 +243,90 @@ test('appdomain page is titled by the name, shows Footprint and Activity, and ex
 test('appdomain page with no footprint fact says so', function () {
   const page = openPage(appDomainEntity, [], []);
   assert.match(page.text, /No facts were reported for: Footprint\./);
+});
+
+function relationEntities(count, kind, prefix) {
+  const found = [];
+  for (let i = 0; i < count; i++) found.push({ kind: kind, joinKey: prefix + String(i).padStart(3, '0') });
+  return found;
+}
+
+// Entity 0 is the one whose page is opened; the others are numbered after it. Pairs are stored lower id first, as the tool writes them.
+function openRelationsPage(subject, others, pairs, sources) {
+  const table = [subject].concat(others).map(function (entity, id) { return Object.assign({ id: id, fidelity: 'High', details: [] }, entity); });
+  entities.setEntityData({
+    entities: table,
+    entitySummary: { factKinds: [], measures: [], claimIds: [], entities: [] },
+    relations: { sources: sources, pairs: pairs },
+    crossDomainInsights: [],
+    domains: [],
+  });
+  location.hash = '#entity/' + String(subject.kind).toLowerCase() + '/' + encodeURIComponent(subject.joinKey);
+  entities.setupEntityPanel();
+  const panel = document.body.children.find(function (child) { return child.tag === 'aside'; });
+  const body = panel._parts.body;
+  const groups = body.descendants().filter(function (n) { return n.tag === 'details'; });
+  return { body, groups, text: body.textContent };
+}
+
+function groupItems(group) {
+  return group.descendants().filter(function (n) { return n.tag === 'li'; });
+}
+
+test('a module page lists its types, sorted, with the shared source on the group line', function () {
+  const types = [{ kind: 'Type', joinKey: 'System.Zeta' }, { kind: 'Type', joinKey: 'System.Alpha' }, { kind: 'Type', joinKey: 'System.Mid' }];
+  const page = openRelationsPage({ kind: 'Module', joinKey: 'mscorlib.dll' }, types, [[0, 1, [0]], [0, 2, [0]], [0, 3, [0]]], ['Memory Analysis / Top types']);
+  assert.equal(page.groups.length, 1);
+  const summary = page.groups[0].children.find(function (n) { return n.tag === 'summary'; });
+  assert.equal(summary.textContent, 'Types (3) · in Memory Analysis / Top types');
+  const items = groupItems(page.groups[0]);
+  assert.deepEqual(items.map(function (li) { return li.children[0].textContent; }), ['System.Alpha', 'System.Mid', 'System.Zeta']);
+  assert.equal(items[0].children[0].href, '#entity/type/' + encodeURIComponent('System.Alpha'));
+  assert.equal(items[0].children.length, 1, 'no per-item source when the whole group shares one');
+  assert.equal(page.groups[0].open, true);
+});
+
+test('a type page lists its module from the same stored pair', function () {
+  const page = openRelationsPage({ kind: 'Type', joinKey: 'System.Alpha' }, [{ kind: 'Module', joinKey: 'mscorlib.dll' }], [[0, 1, [0]]], ['Memory Analysis / Top types']);
+  const summary = page.groups[0].children.find(function (n) { return n.tag === 'summary'; });
+  assert.equal(summary.textContent, 'Modules (1) · in Memory Analysis / Top types');
+  assert.equal(groupItems(page.groups[0])[0].children[0].textContent, 'mscorlib.dll');
+});
+
+test('a large group starts collapsed and empty, and fills in when opened', function () {
+  const types = relationEntities(30, 'Type', 'System.T');
+  const pairs = types.map(function (_, i) { return [0, i + 1, [0]]; });
+  const page = openRelationsPage({ kind: 'Module', joinKey: 'mscorlib.dll' }, types, pairs, ['Memory Analysis / Top types']);
+  const group = page.groups[0];
+  assert.equal(group.open, false);
+  assert.equal(groupItems(group).length, 0);
+  assert.match(group.children[0].textContent, /^Types \(30\)/);
+  group.open = true;
+  group.fire('toggle');
+  assert.equal(groupItems(group).length, 30, 'every neighbour is listed, none dropped');
+  group.fire('toggle');
+  assert.equal(groupItems(group).length, 30, 'opening again does not duplicate the list');
+});
+
+test('groups follow kind order, and an entity seen in different tables shows each item source', function () {
+  const others = [{ kind: 'Thread', joinKey: '24088' }, { kind: 'Type', joinKey: 'System.A' }, { kind: 'Type', joinKey: 'System.B' }];
+  const page = openRelationsPage({ kind: 'Method', joinKey: 'App.Foo::Run' }, others, [[0, 1, [0]], [0, 2, [0]], [0, 3, [0, 1]]], ['Async / Top', 'Crash / Exceptions']);
+  const labels = page.groups.map(function (g) { return g.children[0].textContent; });
+  assert.match(labels[0], /^Types \(2\)$/);
+  assert.match(labels[1], /^Threads \(1\) · in Async \/ Top$/);
+  const typeItems = groupItems(page.groups[0]);
+  assert.equal(typeItems[1].children[1].textContent, ' · in Async / Top, Crash / Exceptions');
+  assert.equal(groupItems(page.groups[1])[0].children[0].textContent, 'OS thread 24088');
+});
+
+test('relations are labelled as appears-with, never as retains or holds', function () {
+  const page = openRelationsPage({ kind: 'Module', joinKey: 'a.dll' }, [{ kind: 'Type', joinKey: 'T' }], [[0, 1, [0]]], ['S / t']);
+  assert.match(page.text, /Appears with: seen in the same table row\./);
+  assert.match(page.text, /does not say that one holds or retains the other/);
+});
+
+test('an entity with no relations says so', function () {
+  const page = openRelationsPage({ kind: 'Module', joinKey: 'a.dll' }, [{ kind: 'Type', joinKey: 'T' }], [], []);
+  assert.match(page.text, /Nothing else in this report appears alongside this one\./);
+  assert.equal(page.groups.length, 0);
 });

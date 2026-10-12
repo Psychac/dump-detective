@@ -4,7 +4,7 @@ Follows [m2-entities-plan.md](m2-entities-plan.md) (D5, deferred) and [m2c-entit
 Tracked as milestone **M2b** in [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path). It fills the dossier's Relations
 slot, which today reads "Not built yet" (`entityRelations` in `report.renderers.entities.js`).
 
-**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-3 done (1-2 on 2026-10-09, 3 on 2026-10-12), step 4 pending.
+**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-3 done (1-2 on 2026-10-09, 3 on 2026-10-12); step 4 measured 2026-10-12, 4a (subscribes-to) next.
 
 ## Goal
 
@@ -75,11 +75,24 @@ and all of those already exist.
    - **Real dump:** +298 observations (260 module-domain, 38 thread-domain); 298 pairs added by key, 0 lost, 0 re-sourced (13,325 to 13,623, 15 sources); entity table, summary rows (apart from the new facts) and claims identical; 0 warnings. The 260 module pairs cover 253 distinct modules: the web domain has 253 and the default domain 7, all 7 of which are also in the web domain. Threads split 9 and 29; all 38 thread entities have a domain. Results: `m2-step1/verify-m2b3-results.txt`.
    - **Not explained:** one named module, `Microsoft.VisualBasic.dll`, has a footprint fact but appears in neither domain's module list, so it has no domain relation. Both enumerations take the module name from the same function, so the cause is not a naming difference; not investigated.
    - **Answers the open question:** the AppDomain tables already link their domain cells (M2c 7a); a domain column in the module and thread tables is not needed now that the page shows the relation.
-4. **Typed entity relations** *(pending, investigate each source before committing to it)*
-   - **Candidates:** retains and held-by-static (reference-chain and static-root data), subscribes-to (event-leak publisher and subscriber), GC root to target (the M2c step 7b decision named relations as the reason to revisit).
-   - **Blocker to check first:** static-root detection never fires in the current code and its fix is held unmerged (see the project memory note), so held-by-static has no data until that is settled.
-   - **Rule:** one source per sub-step, each measured on the reference dump first; a relation type ships only with a source that emits it, never as a placeholder.
-   - **Panel:** typed relations replace "appears with" for the pairs they cover and keep their own labels.
+4. **Typed entity relations** *(measured 2026-10-12, nothing built; per the rule below, one source per sub-step)*
+   - **Rule:** each source is measured on the reference dump first; a relation type ships only with a source that emits it, never as a placeholder. Typed relations replace "appears with" for the pairs they cover and keep their own labels.
+   - **Measured on the reference dump:**
+
+     | Candidate | What exists | Verdict |
+     |---|---|---|
+     | **Subscribes-to** (event leak) | `event.publisher-leak-group` has 1,027 facts whose only subject is the publisher type. Each group keeps an uncapped `AllSubscriberTypeCounts` map (subscriber type to count) in memory; the report shows only a top-20 across groups and per-group counts | **Data exists, exact, not emitted.** Build as 4a. The number of distinct (publisher type, subscriber type) pairs is not known yet: measure it first (an instrumented run) |
+     | **Held by a static field** | `heap.static-root` and `heap.static-root-retained-type` have 0 facts: static-root detection never fires, its fix is held unmerged (+453 s, see the project memory note) | **Blocked.** No data until that is settled |
+     | **GC root to target** | `heap.root` has 1,404 facts naming only the target type; the root kind is already a measure on the type page; 260 stack roots have address 0x0 | **Not a relation.** Nothing to relate without a root entity, and [M2c step 7b](m2c-entity-kinds-plan.md) found the identity weak; revisit only if a root page is wanted |
+     | **Retains, from root chains** | the leak-candidate "Root Chain" has 9 non-empty chains of 13,884; the code calls it "cosmetic enrichment only", capped to the top few (`RootChainTopN`); the reference-chain analyzer samples 10 types | **Not usable.** Capped samples, and D5 forbids relations faked from chain text |
+     | **Retains / dominates, from the dominator tree** | `IDominatorTreeProvider` is exact and already feeds the dominance-chain tree and exact retained bytes | **Unmeasured.** Could give "type A keeps type B alive" at type level; volume and shape unknown |
+
+   - **4a. Subscribes-to** *(pending, measure first)*
+     - **Fact:** a two-subject fact (publisher type, subscriber type) with `subscription.count`, from the existing per-group map. Exactness matters: the map is the uncapped source, so no top-N is introduced.
+     - **Open:** how many facts it adds against the 97,719 observations; a type that subscribes to many publishers; whether the event field belongs on the fact (the group is publisher type plus event field).
+     - **Panel:** "subscribes to" on the subscriber's page and "subscribed to by" on the publisher's, labelled with the fact kind like other fact-sourced relations.
+   - **4b. Dominator-tree relations** *(pending, investigate only if wanted)*
+   - **Not pursued:** held-by-static (blocked), GC root to target (not a relation), chain-based retains (capped samples).
 
 ## Verification (every step)
 

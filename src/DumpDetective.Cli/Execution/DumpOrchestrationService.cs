@@ -5,6 +5,7 @@ using DumpDetective.Cli.Pipeline;
 using DumpDetective.Cli.Pipeline.Nodes;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Orchestration.Graph;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 using DumpDetective.Cli.Models;
@@ -60,7 +61,8 @@ internal sealed class DumpOrchestrationService(
         IReadOnlyList<IAnalyzer> activeAnalyzers,
         IReadOnlyList<string> dumpPaths,
         CancellationToken cancellationToken,
-        string? tracePath = null)
+        string? tracePath = null,
+        IReadOnlyList<CoverageRecord>? coverage = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         bool isTrend = dumpPaths.Count > 1;
@@ -86,7 +88,8 @@ internal sealed class DumpOrchestrationService(
         {
             Resolved = resolved,
             AllAnalyzers = allAnalyzers,
-            ActiveAnalyzers = activeAnalyzers
+            ActiveAnalyzers = activeAnalyzers,
+            Coverage = coverage ?? []
         };
 
         var artifactStates = new List<(SingleDumpPipelineState State, ArtifactPipelineKeys Keys)>();

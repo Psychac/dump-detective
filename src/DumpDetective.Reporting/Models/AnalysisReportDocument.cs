@@ -98,6 +98,9 @@ internal abstract record AnalysisReportDocument
     public IReadOnlyList<FindingRecord>? CrossDomainInsights { get; init; } = null;
     public IReadOnlyList<CorrelationEventRecord>? CorrelationEvents { get; init; } = null;
     public ReportAppendix? Appendix { get; init; } = null;
+
+    /// <summary>Per-capability coverage of the session (docs/ReportStructure/m3-coverage-plan.md); null when the run did not resolve capabilities.</summary>
+    public IReadOnlyList<DumpDetective.Sdk.Artifacts.CoverageRecord>? Coverage { get; init; } = null;
     public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // optional executive summary
 
     /// <summary>Where the observations behind this report's findings were written; null when none were emitted.</summary>

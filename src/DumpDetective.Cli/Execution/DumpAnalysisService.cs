@@ -125,7 +125,8 @@ internal sealed class DumpAnalysisService
         IReadOnlyList<IAnalyzer> activeAnalyzers = GetActiveAnalyzers(resolved, analyzers);
 
         return await _dumpOrchestration.ExecuteAsync(
-            resolved, analyzers, activeAnalyzers, sessionDumpPaths, cancellationToken, tracePath: hasTrace ? resolved.TracePath : null);
+            resolved, analyzers, activeAnalyzers, sessionDumpPaths, cancellationToken, tracePath: hasTrace ? resolved.TracePath : null,
+            coverage: CoverageRecordBuilder.Build(session, resolution));
     }
 
     /// <summary>

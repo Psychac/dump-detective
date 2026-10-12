@@ -66,6 +66,9 @@ internal sealed class SingleDumpPipelineState : IDisposable
     public IReadOnlyDictionary<string, DumpDetective.Reporting.Models.EvidenceSources> EvidenceSourcesByFingerprint { get; set; }
         = new Dictionary<string, DumpDetective.Reporting.Models.EvidenceSources>();
 
+    /// <summary>Per-capability coverage of the session, from capability resolution; carried to the report document.</summary>
+    public IReadOnlyList<DumpDetective.Sdk.Artifacts.CoverageRecord> Coverage { get; set; } = [];
+
     // ── Stage 5: BuildReportStage ────────────────────────────────────────────
     public DumpDetective.Reporting.Models.AnalysisReportDocument? ReportDocument { get; set; }
     public DumpDetective.Core.Models.AnalysisIncidentContext? IncidentContext { get; set; }

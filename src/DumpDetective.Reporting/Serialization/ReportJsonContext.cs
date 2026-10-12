@@ -16,6 +16,8 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(ReportDomainSection))]
 [JsonSerializable(typeof(List<ReportDomainSection>))]
 [JsonSerializable(typeof(ReportAppendix))]
+[JsonSerializable(typeof(DumpDetective.Sdk.Artifacts.CoverageRecord))]
+[JsonSerializable(typeof(List<DumpDetective.Sdk.Artifacts.CoverageRecord>))]
 [JsonSerializable(typeof(AnalyzerMemoryDiagnosticRecord))]
 [JsonSerializable(typeof(List<AnalyzerMemoryDiagnosticRecord>))]
 [JsonSerializable(typeof(DumpDetective.Core.Models.AnalysisIncidentContext))]

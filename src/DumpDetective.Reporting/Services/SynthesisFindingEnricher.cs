@@ -83,13 +83,13 @@ internal sealed class SynthesisFindingEnricher
         if (observations.Count == 0)
             return new SynthesisEnrichment(runs, [], EmptyEvidenceSources, []);
 
-        int failedCount = 0;
-        for (int i = 0; i < runs.Count; i++)
+        var failedAnalyzers = new List<string>();
+        foreach (AnalyzerRunResult run in runs)
         {
-            if (runs[i].Status == AnalyzerExecutionStatus.Failed)
-                failedCount++;
+            if (run.Status == AnalyzerExecutionStatus.Failed)
+                failedAnalyzers.Add(run.AnalyzerName);
         }
-        var context = new SynthesisContext { AnalyzerRunSummary = (runs.Count, failedCount) };
+        var context = new SynthesisContext { FailedAnalyzers = failedAnalyzers };
 
         IReadOnlyList<Claim> findings = await _engine.SynthesizeAsync(observations, context, cancellationToken);
         IReadOnlyList<CoverageRecord> coverage = _engine.EvaluateCoverage(observations, context);

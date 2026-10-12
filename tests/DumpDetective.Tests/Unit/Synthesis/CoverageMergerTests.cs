@@ -38,4 +38,13 @@ public sealed class CoverageMergerTests
 
         CoverageMerger.Merge([complete], []).Should().Equal(complete);
     }
+
+    [Fact]
+    public void Merge_AddsAFailedAnalyzerRecordWithoutReplacingAnything()
+    {
+        CoverageRecord complete = new(new Capability("heap.types"), Dump, CoverageStatus.Complete, []);
+        CoverageRecord failed = new(null, null, CoverageStatus.Failed, [new CoverageImpact("A", CoverageImpactKind.Failed)]);
+
+        CoverageMerger.Merge([complete], [failed, failed]).Should().Equal(complete, failed, failed);
+    }
 }

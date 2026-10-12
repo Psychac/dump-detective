@@ -223,7 +223,7 @@ public sealed class HandlesAsyncAndRetentionRuleClaimTests
             .Evaluate(new ObservationMatchSet([DomPopulation(highlyReferenced: 0, approximated: 40)]), new SynthesisContext());
 
         CoverageRecord record = records.Should().ContainSingle().Subject;
-        record.Capability.Key.Should().Be(CapabilityVocabulary.HeapReverseReferences);
+        record.Capability!.Value.Key.Should().Be(CapabilityVocabulary.HeapReverseReferences);
         record.Status.Should().Be(CoverageStatus.Partial);
         record.Boundary.Should().Be(new CoverageBoundary(40, null, "addresses", "have approximated incoming-reference counts past the tracking limit"));
     }

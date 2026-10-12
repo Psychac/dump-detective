@@ -33,6 +33,9 @@ public enum CoverageImpactKind
     /// <summary>The analyzer runs without a capability it can optionally use.</summary>
     ReducedFidelity,
 
+    /// <summary>The analyzer failed before producing results; it is not tied to any capability.</summary>
+    Failed,
+
     /// <summary>The analyzer ran but stopped at a limit before finishing its scan; the boundary says how far it got.</summary>
     Limited,
 }
@@ -49,14 +52,15 @@ public sealed record CoverageImpact(string Analyzer, CoverageImpactKind Kind, Fi
 
 /// <summary>
 /// One capability's coverage in a session (docs/ReportStructure/ReportSystemVision.md § 7.1).
-/// <paramref name="Artifact"/> names the artifact that provides the capability; it is null when none does,
-/// because a missing capability has no artifact to attach to. <paramref name="Impacts"/> is structured so
+/// <paramref name="Capability"/> is null only for a failed analyzer, which is stated as a fact about that analyzer rather than as a
+/// gap in any capability it declared (other analyzers may still cover them). <paramref name="Artifact"/> names the artifact that
+/// provides the capability; it is null when none does, because a missing capability has no artifact to attach to. <paramref name="Impacts"/> is structured so
 /// the report words the consequence once, in one place. <paramref name="Boundary"/> and <paramref name="Rule"/> are set
 /// only on records an <see cref="ICoverageRule"/> produced; <paramref name="Claims"/> lists the fingerprints of the claims
 /// whose analyzer is limited, so the report can show a claim's coverage without searching.
 /// </summary>
 public sealed record CoverageRecord(
-    Capability Capability,
+    Capability? Capability,
     ArtifactId? Artifact,
     CoverageStatus Status,
     IReadOnlyList<CoverageImpact> Impacts,

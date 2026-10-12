@@ -19,7 +19,11 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>19 as of 2026-10-12 (added <see cref="Synthesis.ICoverageRule"/>, <see cref="Artifacts.CoverageBoundary"/>,
+    /// <summary>20 as of 2026-10-12 (<see cref="Artifacts.CoverageRecord.Capability"/> became nullable and
+    /// <see cref="Artifacts.CoverageImpactKind.Failed"/> was added, for a failed analyzer, which belongs to no capability;
+    /// <see cref="Synthesis.SynthesisContext.AnalyzerRunSummary"/> was replaced by <see cref="Synthesis.SynthesisContext.FailedAnalyzers"/>,
+    /// the names the one rule that read the counts needs as coverage — M3 step 4).
+    /// Before that, 19 as of 2026-10-12 (added <see cref="Synthesis.ICoverageRule"/>, <see cref="Artifacts.CoverageBoundary"/>,
     /// <see cref="Artifacts.CoverageImpactKind.Limited"/> and <see cref="Artifacts.CoverageRecord"/>'s <c>Boundary</c> / <c>Rule</c> / <c>Claims</c> —
     /// M3 step 4 of docs/ReportStructure/m3-coverage-plan.md).
     /// Before that, 18 as of 2026-10-12 (added <see cref="Artifacts.CoverageRecord"/>, <see cref="Artifacts.CoverageStatus"/>,
@@ -121,7 +125,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 19;
+    public const int Minor = 20;
 
     public static string AsString => $"{Major}.{Minor}";
 }

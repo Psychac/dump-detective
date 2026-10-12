@@ -1,4 +1,6 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Reporting.SynthesisRules.Insight;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
@@ -16,26 +18,25 @@ public sealed class InsightRulesBatchTwoClaimTests
     private const long Mb = 1_048_576;
 
     [Fact]
-    public async Task AnalyzerFailures_ClaimShape_MatchesGolden()
+    public void AnalyzerFailureCoverage_AnyFailure_IsAFailedRecordKeyedByAnalyzerAlone()
     {
-        await RuleShapeGolden.AssertMatchesAsync(new AnalyzerFailuresInsightRule(),
-        [
-            new("three-failed", [], new SynthesisContext { AnalyzerRunSummary = (36, 3) }),
-            new("two-failed-says-nothing", [], new SynthesisContext { AnalyzerRunSummary = (36, 2) }),
-        ]);
+        IReadOnlyList<CoverageRecord> records = new AnalyzerFailureCoverageRule()
+            .Evaluate(new ObservationMatchSet([]), new SynthesisContext { FailedAnalyzers = ["Dominator Analysis"] });
+
+        CoverageRecord record = records.Should().ContainSingle().Subject;
+        record.Capability.Should().BeNull();
+        record.Artifact.Should().BeNull();
+        record.Status.Should().Be(CoverageStatus.Failed);
+        record.Impacts.Should().ContainSingle().Which.Should().Be(new CoverageImpact("Dominator Analysis", CoverageImpactKind.Failed));
     }
 
     [Fact]
-    public async Task AnalyzerFailures_ClaimsNoObservationLineage_SoItNeedsNoSupport()
+    public void AnalyzerFailureCoverage_OneRecordPerFailedAnalyzer_AndNoneWhenNothingFailed()
     {
-        IReadOnlyList<Claim> claims = await new AnalyzerFailuresInsightRule()
-            .SynthesizeAsync(new ObservationMatchSet([]), new SynthesisContext { AnalyzerRunSummary = (36, 5) });
+        var rule = new AnalyzerFailureCoverageRule();
 
-        Claim claim = claims.Should().ContainSingle().Subject;
-        claim.DerivedFrom.Should().BeEmpty();
-        claim.Support.Should().BeEmpty();
-        claim.Assertion!.Predicate.Should().Be(AssertionPredicate.Missing);
-        claim.Assertion.Measure!.Value.Value.Should().Be(5);
+        rule.Evaluate(new ObservationMatchSet([]), new SynthesisContext { FailedAnalyzers = ["A", "B"] }).Should().HaveCount(2);
+        rule.Evaluate(new ObservationMatchSet([]), new SynthesisContext()).Should().BeEmpty();
     }
 
     [Fact]

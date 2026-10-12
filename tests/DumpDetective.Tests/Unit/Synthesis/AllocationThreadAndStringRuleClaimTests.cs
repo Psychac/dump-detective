@@ -160,7 +160,7 @@ public sealed class AllocationThreadAndStringRuleClaimTests
             .Evaluate(new ObservationMatchSet([Strings(0.0, 0, 0, coverage: 0.03, sampled: 3_000)]), new SynthesisContext());
 
         CoverageRecord record = records.Should().ContainSingle().Subject;
-        record.Capability.Key.Should().Be(CapabilityVocabulary.HeapStrings);
+        record.Capability!.Value.Key.Should().Be(CapabilityVocabulary.HeapStrings);
         record.Status.Should().Be(CoverageStatus.Partial);
         record.Boundary!.Unit.Should().Be("strings");
         record.Boundary.Total.Should().NotBeNull();

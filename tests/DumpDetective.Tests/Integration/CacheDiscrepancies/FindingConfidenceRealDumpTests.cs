@@ -62,7 +62,7 @@ public sealed class FindingConfidenceRealDumpTests
 
         IReadOnlyList<ISynthesisRule> rules = CreateProductionRules();
         int failedRuns = runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed);
-        var synthesisContext = new SynthesisContext { AnalyzerRunSummary = (runs.Count, failedRuns) };
+        var synthesisContext = new SynthesisContext { FailedAnalyzers = runs.Where(r => r.Status == AnalyzerExecutionStatus.Failed).Select(r => r.AnalyzerName).ToArray() };
 
         IReadOnlyList<Claim> withLineage = await new SynthesisEngine(rules).SynthesizeAsync(observations, synthesisContext);
         List<Claim> ruleOnly = await SynthesizeWithoutLineageAsync(rules, observations, synthesisContext);

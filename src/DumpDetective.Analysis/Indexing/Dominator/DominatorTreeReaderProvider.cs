@@ -13,12 +13,17 @@ internal sealed class DominatorTreeReaderProvider : IDominatorTreeProvider, IDis
     private readonly DominatorTreeIndexReader _scalarReader;
     private readonly DominatorChildIndexReader _childIndexReader;
     private readonly DominatorTreeMetadata _metadata;
+    private readonly CacheContainerReader _container;
+    private readonly object _typePairsLock = new();
+    private IReadOnlyList<DominatorTypePair>? _typePairs;
     private readonly Dictionary<ulong, ulong> _retainedBytesByMethodTable;
     private bool _disposed;
 
     private DominatorTreeReaderProvider(
-        DominatorTreeIndexReader scalarReader, DominatorChildIndexReader childIndexReader, DominatorTreeMetadata metadata)
+        DominatorTreeIndexReader scalarReader, DominatorChildIndexReader childIndexReader, DominatorTreeMetadata metadata,
+        CacheContainerReader container)
     {
+        _container = container;
         _scalarReader = scalarReader;
         _childIndexReader = childIndexReader;
         _metadata = metadata;
@@ -57,7 +62,7 @@ internal sealed class DominatorTreeReaderProvider : IDominatorTreeProvider, IDis
             return false;
         }
 
-        provider = new DominatorTreeReaderProvider(scalarReader, childIndexReader, metadata);
+        provider = new DominatorTreeReaderProvider(scalarReader, childIndexReader, metadata, container);
         return true;
     }
 
@@ -94,6 +99,46 @@ internal sealed class DominatorTreeReaderProvider : IDominatorTreeProvider, IDis
     }
 
     public ulong TotalRetainedBytes => _metadata.TotalRetainedBytes;
+
+    public IReadOnlyList<DominatorTypePair> GetImmediateDominatorTypePairs()
+    {
+        lock (_typePairsLock)
+            return _typePairs ??= ComputeTypePairs();
+    }
+
+    // One streaming pass over the object index. The dominator's own method table is a point lookup (an object can be dominated by any
+    // address), the object's comes with the stream, so nothing proportional to the object count is held: only the distinct pairs.
+    private IReadOnlyList<DominatorTypePair> ComputeTypePairs()
+    {
+        if (!ObjectAddressLookup.TryOpen(_container, out ObjectAddressLookup? lookup) || lookup is null)
+            return [];
+
+        using (lookup)
+        {
+            var countsByPair = new Dictionary<(ulong Dominator, ulong Object), long>();
+            foreach (HeapEntry entry in ObjectIndexReader.ReadDiskEntries(_container))
+            {
+                if (!_scalarReader.TryGetImmediateDominator(entry.Address, out ulong dominatorAddress) || dominatorAddress == 0)
+                    continue;
+
+                if (!lookup.TryGetEntry(dominatorAddress, out ulong dominatorMethodTable, out _))
+                    continue;
+
+                ref long count = ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault(
+                    countsByPair, (dominatorMethodTable, entry.MethodTable), out _);
+                count++;
+            }
+
+            var pairs = new List<DominatorTypePair>(countsByPair.Count);
+            foreach (KeyValuePair<(ulong Dominator, ulong Object), long> pair in countsByPair)
+                pairs.Add(new DominatorTypePair(pair.Key.Dominator, pair.Key.Object, pair.Value));
+
+            pairs.Sort(static (a, b) => a.DominatorMethodTable != b.DominatorMethodTable
+                ? a.DominatorMethodTable.CompareTo(b.DominatorMethodTable)
+                : a.MethodTable.CompareTo(b.MethodTable));
+            return pairs;
+        }
+    }
 
     public bool TryGetRetainedBytesByMethodTable(ulong methodTable, out ulong retainedBytes) =>
         _retainedBytesByMethodTable.TryGetValue(methodTable, out retainedBytes);

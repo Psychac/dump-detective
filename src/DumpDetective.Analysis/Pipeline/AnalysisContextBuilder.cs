@@ -68,7 +68,7 @@ internal static class AnalysisContextBuilder
                 ? new HeapReachabilityQuery(reachableProvider)
                 : null,
             HeapDominators = treeProvider is not null
-                ? new HeapDominatorQuery(treeProvider, context.Cache.TryGetThreadRetentionProvider(), objectLookup)
+                ? new HeapDominatorQuery(treeProvider, context.Cache.TryGetThreadRetentionProvider(), objectLookup, methodTable => context.Heap.GetTypeByMethodTable(methodTable)?.Name)
                 : null,
             HeapRootPaths = new HeapRootPathQuery(context.Heap, context.Cache),
             RuntimeThreads = runtimeThreadsOverride ?? new RuntimeThreadQuery(context.Runtime, context.Cache),

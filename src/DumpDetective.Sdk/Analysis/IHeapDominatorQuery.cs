@@ -14,6 +14,12 @@ namespace DumpDetective.Sdk.Analysis;
 /// them was wrong: a session where Stage A succeeded but Stage B didn't had no way to expose
 /// reachability alone.
 /// </summary>
+/// <summary>
+/// How many reachable objects of type <paramref name="Dominated"/> have an object of type <paramref name="Dominator"/> as their immediate
+/// dominator. Types are canonical, so pairs that differ only in a compiler-assigned ordinal or generic instantiation arrive merged.
+/// </summary>
+public readonly record struct DominatedTypePair(TypeRef Dominator, TypeRef Dominated, long ObjectCount);
+
 public interface IHeapDominatorQuery
 {
     /// <summary>Mirrors <c>IDominatorTreeProvider</c> — "what would freeing this object free?"</summary>
@@ -50,4 +56,10 @@ public interface IHeapDominatorQuery
     /// has no record for it.
     /// </summary>
     bool TryGetRetainedBytesByType(TypeRef type, out ulong retainedBytes);
+
+    /// <summary>
+    /// Every distinct (immediate dominator type, dominated type) pair over all reachable objects, with the number of objects having it. Exact
+    /// and uncapped. Empty when the tree cannot answer. Added for the dossier's relations (docs/ReportStructure/m2b-relations-plan.md, step 4b).
+    /// </summary>
+    IReadOnlyList<DominatedTypePair> GetImmediateDominatorTypePairs() => [];
 }

@@ -49,6 +49,7 @@ internal static class EntityFactPanels
         ["event.publisher-leak"] = Retention,
         ["event.publisher-leak-group"] = Retention,
         ["event.subscription"] = Retention,
+        ["type.dominance"] = Retention,
         ["thread.retained-bytes"] = Retention,
 
         ["finalizer.queue-entry"] = Lifecycle,

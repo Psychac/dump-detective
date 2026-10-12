@@ -15,6 +15,11 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.99.0 — 2026-10-12
+
+M2b step 4b: `type.dominance`, a two-subject fact (dominator type, then dominated type) with `object.count`, one per distinct immediate-dominator type
+pair over all reachable objects. It makes "what holds this type" a fact the Relations panel can read. Additive; no `direction`.
+
 ## `observation-type-registry.json` 1.98.0 — 2026-10-12
 
 M2b step 4a: `event.subscription`, a two-subject fact (publisher type, then subscriber type) with `subscription.count`, one per leak group and

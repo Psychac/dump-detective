@@ -375,3 +375,13 @@ test('a type that is both publisher and subscriber of another shows both roles o
   const page = openRelationsPage({ kind: 'Type', joinKey: 'App.A' }, [{ kind: 'Type', joinKey: 'App.B' }], [[0, 1, [0, 1]]], sources);
   assert.equal(page.groups[0].children[0].textContent, 'Types (1) · subscribes to this, this subscribes to it');
 });
+
+test('dominance relations name the side: dominators list what they dominate, dominated types list their dominators', function () {
+  const sources = ['fact: type.dominance', 'fact: type.dominance (reversed)'];
+  // Page is entity 0 = the dominator (first subject, lower id): the other is immediately dominated by this.
+  const asDominator = openRelationsPage({ kind: 'Type', joinKey: 'App.Holder' }, [{ kind: 'Type', joinKey: 'App.Item' }], [[0, 1, [0]]], sources);
+  assert.equal(asDominator.groups[0].children[0].textContent, 'Types (1) \u00b7 immediately dominated by this');
+  // Page is entity 0 = the dominated type; its dominator has the higher id, so the stored source is reversed.
+  const asDominated = openRelationsPage({ kind: 'Type', joinKey: 'App.Item' }, [{ kind: 'Type', joinKey: 'App.Holder' }], [[0, 1, [1]]], sources);
+  assert.equal(asDominated.groups[0].children[0].textContent, 'Types (1) \u00b7 this is immediately dominated by it');
+});

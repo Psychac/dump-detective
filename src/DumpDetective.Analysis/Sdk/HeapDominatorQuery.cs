@@ -15,8 +15,44 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// <c>GCRootAnalyzer</c>'s own single upfront "is Stage B available at all" gate rather than
 /// re-deriving it per call.
 /// </summary>
-internal sealed class HeapDominatorQuery(IDominatorTreeProvider treeProvider, IThreadRetentionProvider? threadRetentionProvider, IHeapObjectLookup objectLookup) : IHeapDominatorQuery
+internal sealed class HeapDominatorQuery(
+    IDominatorTreeProvider treeProvider, IThreadRetentionProvider? threadRetentionProvider, IHeapObjectLookup objectLookup,
+    Func<ulong, string?>? resolveTypeName = null) : IHeapDominatorQuery
 {
+    public IReadOnlyList<DominatedTypePair> GetImmediateDominatorTypePairs()
+    {
+        if (resolveTypeName is null)
+            return [];
+
+        var typeByMethodTable = new Dictionary<ulong, TypeRef>();
+        TypeRef TypeOf(ulong methodTable)
+        {
+            if (!typeByMethodTable.TryGetValue(methodTable, out TypeRef? type))
+                typeByMethodTable[methodTable] = type = SdkTypeRefFactory.FromName(resolveTypeName(methodTable) ?? $"MT:0x{methodTable:x}", methodTable);
+            return type;
+        }
+
+        // Distinct method tables can canonicalize to one name (generic instantiations, state machines), so their counts are added.
+        var merged = new Dictionary<(string Dominator, string Dominated), (TypeRef Dominator, TypeRef Dominated, long Count)>();
+        foreach (DominatorTypePair pair in treeProvider.GetImmediateDominatorTypePairs())
+        {
+            TypeRef dominator = TypeOf(pair.DominatorMethodTable);
+            TypeRef dominated = TypeOf(pair.MethodTable);
+            var key = (dominator.CanonicalName, dominated.CanonicalName);
+            merged[key] = merged.TryGetValue(key, out var existing)
+                ? (existing.Dominator, existing.Dominated, existing.Count + pair.ObjectCount)
+                : (dominator, dominated, pair.ObjectCount);
+        }
+
+        var pairs = new List<DominatedTypePair>(merged.Count);
+        foreach (var entry in merged.Values)
+            pairs.Add(new DominatedTypePair(entry.Dominator, entry.Dominated, entry.Count));
+
+        pairs.Sort(static (a, b) => string.CompareOrdinal(a.Dominator.CanonicalName, b.Dominator.CanonicalName) is var c and not 0
+            ? c : string.CompareOrdinal(a.Dominated.CanonicalName, b.Dominated.CanonicalName));
+        return pairs;
+    }
+
     public bool TryGetRetainedSize(ulong address, out ulong retainedBytes) =>
         treeProvider.TryGetRetainedBytes(address, out retainedBytes);
 

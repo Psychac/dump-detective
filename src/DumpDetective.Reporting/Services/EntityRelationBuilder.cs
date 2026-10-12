@@ -21,7 +21,7 @@ internal static class EntityRelationBuilder
     // source name says when the first subject was the higher id. The client reads both back to say which side the open page is on.
     public const string ReversedSuffix = " (reversed)";
 
-    private static readonly HashSet<string> DirectedFactKinds = new(StringComparer.Ordinal) { "event.subscription" };
+    private static readonly HashSet<string> DirectedFactKinds = new(StringComparer.Ordinal) { "event.subscription", "type.dominance" };
 
     public static EntityRelations? FromTables(IReadOnlyList<ReportDomainSection>? domains)
     {

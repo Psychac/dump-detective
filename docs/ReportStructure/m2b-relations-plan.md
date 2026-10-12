@@ -4,7 +4,7 @@ Follows [m2-entities-plan.md](m2-entities-plan.md) (D5, deferred) and [m2c-entit
 Tracked as milestone **M2b** in [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path). It fills the dossier's Relations
 slot, which today reads "Not built yet" (`entityRelations` in `report.renderers.entities.js`).
 
-**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-3 done (1-2 on 2026-10-09, 3 on 2026-10-12); step 4 measured 2026-10-12, 4a (subscribes-to) done; 4b (dominator-tree) measured, not built.
+**Status:** done 2026-10-12 apart from what is blocked. D1-D6 decided 2026-10-09; steps 1-3 done (1-2 on 2026-10-09, 3 on 2026-10-12); step 4 done 2026-10-12 (4a subscribes-to, 4b dominator-tree); held-by-static stays blocked.
 
 ## Goal
 
@@ -100,8 +100,15 @@ and all of those already exist.
      - **Skew:** 7,393 pairs have 2 or more objects, 1,249 have 100 or more (98.5% of the objects), 111 have 10,000 or more. Per the no-top-N rule every pair would be kept; the long tail costs about 9,500 single-object pairs.
      - **Shape (names, rough heuristic):** 1,202 pairs (532,263 objects) involve no System or Microsoft type, so they are application relations; 913 pairs are plain container storage (`X[]` to `X`); 706 are the same generic type. Largest: `System.Data.DataTable` to `System.Data.DataRow` (1,226,677 objects), `System.String[]` to `System.String` (798,816), `CompanyMasterData[]` to `CompanyMasterData` (192,926), `RuntimeTypeCache` to `RuntimeMethodInfo` (121,091). The widest dominator type dominates 3,002 different types.
      - **Meaning:** exact and structural: "freeing every object of type A would free these objects of type B". It answers "what holds this type" in terms of other types, the thing M2b's goal names. It also includes implementation structure (array holds elements), which is true but not news.
-     - **If built:** one directed fact per (dominator type, object type) with an object count (the existing directed-fact mechanism and "dominates" / "held by" wording); emitted from a streaming pass over the dominator tree (the measurement kept 233 MB of address and method-table arrays in memory, which a real implementation should replace with the memory-mapped columns); a type page with thousands of neighbours (String) relies on the collapsed lists already built.
-     - **Open:** whether 17% more observations is acceptable; whether to show the object count on each relation; the cost on the 25 GB dump (not measured, and not run: it takes about 25 minutes). Files: `m2-step1/dominator-pairs-results.txt`, `dominator-pairs.tsv`, `dominator-pairs-analysis.txt`.
+     - **Built 2026-10-12 and verified on the reference dump** (below).
+   - **4b. Built** *(done 2026-10-12, verified on reference dump)*
+     - **Fact:** `type.dominance`, two subjects (dominator type, then dominated type) and `object.count`, one per distinct pair, emitted by `DominatorAnalyzer`. Registry 1.99.0, changelog entry, conformance list; Retention panel. Wording on the pages: "immediately dominated by this" on a dominator, "this is immediately dominated by it" on a dominated type (the directed-fact mechanism from 4a).
+     - **Query:** `IDominatorTreeProvider.GetImmediateDominatorTypePairs()` and `IHeapDominatorQuery.GetImmediateDominatorTypePairs()`, both default-empty interface members so no provider or fake needed changing. The disk provider computes it once, lazily, in one streaming pass over the object index: the dominator's method table is a point lookup, the object's comes with the stream, and only the distinct pairs are held (no arrays proportional to the object count, unlike the throwaway measurement). The dump-side query resolves method tables to canonical types and adds counts that canonicalization merges.
+     - **Also fixed:** `EntitySummaryBuilder` counted a fact twice for an entity named by both subjects (a type that dominates its own type: 155 pairs here; the 7 self-subscriptions had the same flaw). It now counts once per entity.
+     - **Tests:** 3 in `TypeDominanceTests` (merge by canonical name, unresolvable method table, emission order and count), 1 summary test, harness 32 of 32 (1 new); full suite 1,781 passed, 66 skipped. The disk provider has no unit test (it needs a full container); the real dump is its check.
+     - **Real dump:** 16,739 facts (+16.8%: 99,699 to 116,438 observations); **the sum of `object.count` (6,469,153) and every pair, by name and count, equal the earlier throwaway measurement exactly**; entities unchanged (0 added); claims identical; 0 warnings; 16,335 relation pairs added, 207 existing pairs (all with a subscription fact) gained the dominance source, none lost; report.json +0.46 MB, HTML 3.30 MB. Examples: `DataTable` is related to 40 types by dominance, `DataRow` to 10, `String` to 974. Results: `m2-step1/verify-m2b4b-results.txt`.
+     - **Cost:** Dominator Analysis went from 8.1 s to 18.1 s (+10 s); peak process working set unchanged (3.3 GB against 3.4 GB). Not measured on the 25 GB dump (about 25 minutes to run).
+     - **Left open:** the object count is not shown on a relation line; the type pairs scale with distinct type pairs, so a much larger dump may have many more.
    - **Not pursued:** held-by-static (blocked), GC root to target (not a relation), chain-based retains (capped samples).
 
 ## Verification (every step)

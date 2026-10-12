@@ -202,6 +202,8 @@ public sealed class DominatorAnalyzer :
         }
 
         await EmitRetentionObservationsAsync(objectLookup, result, observationContext, cancellationToken);
+        if (dominators is not null)
+            await EmitTypeDominanceObservationsAsync(dominators, observationContext, cancellationToken);
 
         return result;
     }
@@ -226,6 +228,42 @@ public sealed class DominatorAnalyzer :
     /// <see cref="DominatorDomainResult.TopHighlyReferencedObjects"/> by type, a different population
     /// than <see cref="DominatorDomainResult.TopDominatorTypes"/>).
     /// </summary>
+    /// <summary>
+    /// One <c>type.dominance</c> observation per (immediate dominator type, dominated type) pair over every reachable object: the
+    /// first subject is the dominator, the second the type it immediately dominates, <c>object.count</c> how many objects have that
+    /// relation. Exact and uncapped (m2b-relations-plan.md, step 4b); the number of facts follows the number of distinct type pairs.
+    /// </summary>
+    internal static async ValueTask EmitTypeDominanceObservationsAsync(
+        IHeapDominatorQuery dominators, AnalysisContext observationContext, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapDominators, CapabilityVocabulary.HeapObjects };
+
+        foreach (DominatedTypePair pair in dominators.GetImmediateDominatorTypePairs())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "type.dominance",
+                Subjects = [pair.Dominator, pair.Dominated],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["object.count"] = new Measure(pair.ObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Dominator Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+    }
+
     private static async ValueTask EmitRetentionObservationsAsync(
         IHeapObjectLookup objectLookup, DominatorDomainResult result, AnalysisContext observationContext, CancellationToken cancellationToken)
     {

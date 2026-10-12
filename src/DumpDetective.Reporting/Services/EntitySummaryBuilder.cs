@@ -28,6 +28,10 @@ internal static class EntitySummaryBuilder
             IReadOnlyList<EntityRef> subjects = observation.Subjects;
             for (int s = 0; s < subjects.Count; s++)
             {
+                // A fact that names one entity twice (a type holding objects of its own type) is still one fact for that entity.
+                if (NamedEarlier(subjects, s))
+                    continue;
+
                 if (!entityIdByKey.TryGetValue((subjects[s].Kind, subjects[s].JoinKey), out int entityId))
                     continue;
 
@@ -46,6 +50,17 @@ internal static class EntitySummaryBuilder
         AddClaimsBySubject(claims, claimIds, entityIdByKey, claimIndexesByEntity);
         List<string> linkedClaimIds = KeepLinkedClaims(claimIds, claimIndexesByEntity);
         return Index(accumulatorsByEntity, analyzerByFactKind, measureKeys, linkedClaimIds, claimIndexesByEntity);
+    }
+
+    private static bool NamedEarlier(IReadOnlyList<EntityRef> subjects, int index)
+    {
+        for (int earlier = 0; earlier < index; earlier++)
+        {
+            if (subjects[earlier].Kind == subjects[index].Kind && string.Equals(subjects[earlier].JoinKey, subjects[index].JoinKey, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     // A claim that cites only process-wide numbers reaches no entity; listing its id would cost bytes and imply a link

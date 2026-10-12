@@ -1,6 +1,12 @@
 namespace DumpDetective.Core.Abstractions;
 
 /// <summary>
+/// How many reachable objects of <paramref name="MethodTable"/> have an object of <paramref name="DominatorMethodTable"/> as their immediate
+/// dominator. Objects hanging directly off a GC root have no object dominator and are not counted.
+/// </summary>
+public readonly record struct DominatorTypePair(ulong DominatorMethodTable, ulong MethodTable, long ObjectCount);
+
+/// <summary>
 /// "What would freeing this object free?" — the exact dominator tree computed during Phase 1 (§10.4,
 /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md). Backed entirely by disk
 /// sections written by <c>DiskBackedObjectIndexWriter.Build</c>'s Stage B; there is no in-memory
@@ -44,4 +50,11 @@ public interface IDominatorTreeProvider
     /// <paramref name="methodTable"/>, whether or not each instance survived leaf-folding.
     /// </summary>
     bool TryGetRetainedBytesByMethodTable(ulong methodTable, out ulong retainedBytes);
+
+    /// <summary>
+    /// Every distinct (immediate dominator's method table, object's method table) pair over all reachable objects, with how many objects
+    /// have it. Exact and uncapped; the number of pairs follows the number of distinct type pairs, not the number of objects. Empty when
+    /// this provider cannot read object method tables.
+    /// </summary>
+    IReadOnlyList<DominatorTypePair> GetImmediateDominatorTypePairs() => [];
 }

@@ -78,6 +78,22 @@ public sealed class EntitySummaryTests : IDisposable
         EntityFactPanels.PanelFor(factKind).Should().Be(expectedPanel);
 
     [Fact]
+    public void Build_FactNamingTheSameEntityTwice_CountsOncePerEntity()
+    {
+        TypeRef node = Type("App.Node");
+        TypeRef holder = Type("App.Holder");
+        Observation[] observations = [Fact("type.dominance", "Dominator Analysis", [node, node], ("object.count", 7, MeasureUnit.Count)),
+                                      Fact("type.dominance", "Dominator Analysis", [holder, node], ("object.count", 3, MeasureUnit.Count))];
+
+        (EntitySummary summary, FactGroup[] groups) = BuildFor(observations, node);
+
+        FactGroup group = groups.Single();
+        group.Count.Should().Be(2, "one self-pair fact and one holder fact, each counted once");
+        group.Stats.Single().Sum.Should().Be(10);
+        summary.FactKinds.Single().Name.Should().Be("type.dominance");
+    }
+
+    [Fact]
     public void Build_SingleFact_GivesItsValueAsSumMinAndMax()
     {
         TypeRef column = Type("System.Data.DataColumn");

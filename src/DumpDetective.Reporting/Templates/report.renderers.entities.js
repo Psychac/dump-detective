@@ -463,6 +463,7 @@ function entityRelationGroup(kind, items, selfId) {
 // after the fact kind when the first subject had the higher entity id, because pairs are stored lower id first.
 const ENTITY_DIRECTED_FACTS = {
   'event.subscription': { asFirst: 'subscribes to this', asSecond: 'this subscribes to it' },
+  'type.dominance': { asFirst: 'immediately dominated by this', asSecond: 'this is immediately dominated by it' },
 };
 
 // A source is a table ("Analyzer / Table title") or a fact kind, written with a "fact: " prefix by the tool.

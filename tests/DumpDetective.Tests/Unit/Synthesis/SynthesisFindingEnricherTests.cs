@@ -115,7 +115,7 @@ public sealed class SynthesisFindingEnricherTests
         record.Rule.Should().Be(new RuleRef("stub.coverage", 1));
 
         Claim limited = enrichment.UnattachedFindings.Single(c => c.Fingerprint == "stub-fingerprint");
-        limited.Confidence.LimitingFactors.Should().ContainSingle().Which.Should().Contain("7 of 10 stub items before the stub limit");
+        limited.Confidence.LimitingFactors.Should().ContainSingle().Which.Should().Contain("7 of 10 stub items hit the stub limit");
         limited.Confidence.Composite.Should().Be(ConfidenceBreakdown.MeasurementCertain.Composite);
 
         enrichment.UnattachedFindings.Single(c => c.Fingerprint == "other-fingerprint").Confidence.LimitingFactors.Should().BeEmpty();
@@ -146,7 +146,7 @@ public sealed class SynthesisFindingEnricherTests
         [
             new CoverageRecord(
                 new Capability("stub.capability"), new ArtifactId("stub-artifact"), CoverageStatus.Partial,
-                [new CoverageImpact(analyzer, CoverageImpactKind.Limited)], new CoverageBoundary(7, 10, "stub items", "stub limit")),
+                [new CoverageImpact(analyzer, CoverageImpactKind.Limited)], new CoverageBoundary(7, 10, "stub items", "hit the stub limit")),
         ];
     }
 

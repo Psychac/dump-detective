@@ -208,6 +208,32 @@ public sealed class HandlesAsyncAndRetentionRuleClaimTests
         complete.Single(c => c.Fingerprint.EndsWith("highly-referenced-objects")).Counter!.Statements.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Dominator_ApproximatedReferenceCountsAreNoLongerAClaim_TheyAreCoverage()
+    {
+        IReadOnlyList<Claim> claims = await RunAsync(new DominatorSynthesisRule(), [DomPopulation(highlyReferenced: 0, approximated: 40)]);
+
+        claims.Should().NotContain(c => c.Fingerprint.EndsWith("reference-tracking-capped"));
+    }
+
+    [Fact]
+    public void DominatorCoverage_ApproximatedCounts_IsPartialWithAnUnknownTotal()
+    {
+        IReadOnlyList<CoverageRecord> records = new DominatorCoverageRule()
+            .Evaluate(new ObservationMatchSet([DomPopulation(highlyReferenced: 0, approximated: 40)]), new SynthesisContext());
+
+        CoverageRecord record = records.Should().ContainSingle().Subject;
+        record.Capability.Key.Should().Be(CapabilityVocabulary.HeapReverseReferences);
+        record.Status.Should().Be(CoverageStatus.Partial);
+        record.Boundary.Should().Be(new CoverageBoundary(40, null, "addresses", "have approximated incoming-reference counts past the tracking limit"));
+    }
+
+    [Fact]
+    public void DominatorCoverage_ExactCounts_ProducesNoRecord()
+    {
+        new DominatorCoverageRule().Evaluate(new ObservationMatchSet([DomPopulation(highlyReferenced: 3)]), new SynthesisContext()).Should().BeEmpty();
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private static async Task<IReadOnlyList<Claim>> RunAsync(ISynthesisRule rule, IReadOnlyList<Observation> observations) =>

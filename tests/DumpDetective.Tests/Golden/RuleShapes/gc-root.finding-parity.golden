@@ -1,5 +1,5 @@
 rule: gc-root.finding-parity
-version: 1
+version: 2
 [
   {
     "name": "static-warning-exact",
@@ -231,41 +231,6 @@ version: 1
   },
   {
     "name": "walk-capped",
-    "claims": [
-      {
-        "fingerprint": "gc root analysis::subgraph-walk-capped",
-        "severity": "Info",
-        "assertion": {
-          "predicate": "Missing",
-          "measure": {
-            "value": 7,
-            "unit": "Count",
-            "semantics": "Count"
-          },
-          "qualifiers": {
-            "location": "root-owned subgraph walk",
-            "scope": "subgraphs truncated at the node or depth budget"
-          }
-        },
-        "support": [
-          {
-            "observations": [
-              "observations[0]"
-            ],
-            "why": "The traversal hit its node or depth budget on 7 root-owned subgraphs."
-          }
-        ],
-        "counter": {
-          "statements": [],
-          "noneFoundBecause": "The cap is a budget set by the analysis, so a larger budget would change what is reported; it is not a property of the process."
-        },
-        "falsifiedBy": [
-          {
-            "kind": "CodeInspection",
-            "test": "Re-run with a larger subgraph walk budget; if the retained totals barely change, the truncation was not material."
-          }
-        ]
-      }
-    ]
+    "claims": []
   }
 ]

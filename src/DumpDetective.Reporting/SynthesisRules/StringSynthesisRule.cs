@@ -22,7 +22,7 @@ internal sealed class StringSynthesisRule : ISynthesisRule
     private const string AnalyzerName = "String Analysis";
 
     public string RuleId => "string.finding-parity";
-    public int Version => 1;
+    public int Version => 2;
 
     public ObservationQuery Query { get; } = new()
     {
@@ -220,40 +220,7 @@ internal sealed class StringSynthesisRule : ISynthesisRule
             });
         }
 
-        if (samplingCoverage < 0.05 && samplingCoverage > 0)
-        {
-            findings.Add(new Claim
-            {
-                Fingerprint = Fingerprint("low-sampling-coverage"),
-                Assertion = new Assertion
-                {
-                    Predicate = AssertionPredicate.Missing,
-                    Measure = ClaimParts.Percent(samplingCoverage * 100.0),
-                    Qualifiers = new AssertionQualifiers { Location = "string deduplication analysis", Scope = "strings within the maximum duplicate-string length" },
-                },
-                Support = [new EvidenceStatement([composition.Id], $"Deduplication saw {stringsSampled:N0} strings, {samplingCoverage * 100.0:F1}% of all strings.")],
-                Counter = Counter.None("Coverage is bounded by how many strings fall within the maximum duplicate-string length, not by a sampling budget, so more run time would not raise it."),
-                FalsifiedBy =
-                [
-                    new FalsificationTest
-                    {
-                        Kind = FalsificationKind.CodeInspection,
-                        Test = "Re-run with a larger MaxDuplicateStringLength; if coverage rises above 5%, the gap was the length cap, not the heap.",
-                    },
-                ],
-                Analyzer = AnalyzerName,
-                Category = "Analysis",
-                Severity = Severity.Info,
-                Title = "Low sampling coverage on deduplication analysis",
-                Narrative = $"String deduplication was performed on a sample covering only {samplingCoverage * 100.0:F1}% of all strings ({stringsSampled:N0} sampled out of ~{(int)(stringsSampled / Math.Max(samplingCoverage, 0.01)):N0} total). Results may not be representative of heap-wide patterns.",
-                Recommendation = "Low coverage here reflects how many strings fell within MaxDuplicateStringLength, not a configurable sampling limit. Current results should be treated as indicative, not definitive.",
-                Tags = ["sampling", "coverage", "deduplication"],
-                MetricValue = samplingCoverage * 100.0,
-                MetricUnit = "percent",
-                DerivedFrom = [composition.Id],
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
-            });
-        }
+        // Low sampling coverage is coverage, not a claim about the dump: see StringCoverageRule.
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }

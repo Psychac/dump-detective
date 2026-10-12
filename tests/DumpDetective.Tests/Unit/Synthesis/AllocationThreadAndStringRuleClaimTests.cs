@@ -1,4 +1,5 @@
 using DumpDetective.Reporting.SynthesisRules;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
@@ -145,12 +146,33 @@ public sealed class AllocationThreadAndStringRuleClaimTests
     }
 
     [Fact]
-    public async Task String_LowSamplingCoverage_IsAMissingClaim_NotAProblemWithTheProcess()
+    public async Task String_LowSamplingCoverage_IsNoLongerAClaim_ItIsCoverage()
     {
-        Claim claim = (await RunAsync(new StringSynthesisRule(), [Strings(0.0, 0, 0, coverage: 0.03, sampled: 3_000)])).Single();
+        IReadOnlyList<Claim> claims = await RunAsync(new StringSynthesisRule(), [Strings(0.0, 0, 0, coverage: 0.03, sampled: 3_000)]);
 
-        claim.Assertion!.Predicate.Should().Be(AssertionPredicate.Missing);
-        claim.Assertion.Measure!.Value.Value.Should().BeApproximately(3, 0.001);
+        claims.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void StringCoverage_LowSampling_IsPartialWithTheStringsTheScanDidNotSee()
+    {
+        IReadOnlyList<CoverageRecord> records = new StringCoverageRule()
+            .Evaluate(new ObservationMatchSet([Strings(0.0, 0, 0, coverage: 0.03, sampled: 3_000)]), new SynthesisContext());
+
+        CoverageRecord record = records.Should().ContainSingle().Subject;
+        record.Capability.Key.Should().Be(CapabilityVocabulary.HeapStrings);
+        record.Status.Should().Be(CoverageStatus.Partial);
+        record.Boundary!.Unit.Should().Be("strings");
+        record.Boundary.Total.Should().NotBeNull();
+        record.Boundary.Affected.Should().Be(record.Boundary.Total!.Value - 3_000);
+    }
+
+    [Fact]
+    public void StringCoverage_SufficientSampling_ProducesNoRecord()
+    {
+        new StringCoverageRule()
+            .Evaluate(new ObservationMatchSet([Strings(0.0, 0, 0, coverage: 0.5, sampled: 3_000)]), new SynthesisContext())
+            .Should().BeEmpty();
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -217,5 +239,6 @@ public sealed class AllocationThreadAndStringRuleClaimTests
             ["total-string-memory.bytes"] = Bytes(totalString),
             ["sampling-coverage.ratio"] = Ratio(coverage),
             ["strings-sampled.count"] = Count(sampled),
+            ["total-string.count"] = Count(sampled / Math.Max(coverage, 0.01)),
         });
 }

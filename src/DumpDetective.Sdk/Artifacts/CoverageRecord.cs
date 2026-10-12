@@ -37,8 +37,12 @@ public enum CoverageImpactKind
     Limited,
 }
 
-/// <summary>How far a limited scan got: <paramref name="Reached"/> of <paramref name="Total"/> <paramref name="Unit"/>, stopped by <paramref name="Limit"/>.</summary>
-public sealed record CoverageBoundary(long Reached, long Total, string Unit, string Limit);
+/// <summary>
+/// Which part of a scan a limit touched: <paramref name="Affected"/> of <paramref name="Total"/> <paramref name="Unit"/> followed by
+/// <paramref name="Limit"/>, a verb phrase ("hit the path or depth budget"). <paramref name="Total"/> is null when the analyzer does not
+/// know the population; zero means nothing was available to scan, and <paramref name="Limit"/> then says why.
+/// </summary>
+public sealed record CoverageBoundary(long Affected, long? Total, string Unit, string Limit);
 
 /// <summary>An analyzer affected by a missing capability. <paramref name="Fidelity"/> is set only for <see cref="CoverageImpactKind.ReducedFidelity"/>.</summary>
 public sealed record CoverageImpact(string Analyzer, CoverageImpactKind Kind, FidelityBoost? Fidelity = null);

@@ -45,7 +45,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
     private const string AnalyzerName = "Dominator Analysis";
 
     public string RuleId => "dominator.finding-parity";
-    public int Version => 1;
+    public int Version => 2;
 
     public ObservationQuery Query { get; } = new()
     {
@@ -246,47 +246,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
             }
         }
 
-        // ── Reference tracking capped ────────────────────────────────────────────
-        if (population is not null)
-        {
-            long approximatedReferenceAddresses = (long)population.Measures["approximated-reference-addresses.count"].Value;
-
-            if (approximatedReferenceAddresses > 0)
-            {
-                findings.Add(new Claim
-                {
-                    Fingerprint = Fingerprint("reference-tracking-capped"),
-                    Assertion = new Assertion
-                    {
-                        Predicate = AssertionPredicate.Missing,
-                        Measure = ClaimParts.Count(approximatedReferenceAddresses),
-                        Qualifiers = new AssertionQualifiers { Location = "incoming-reference counts", Scope = "addresses past the tracking limit" },
-                    },
-                    Support = [new EvidenceStatement([population.Id], $"{approximatedReferenceAddresses:N0} references have approximated, bounded-error counts.")],
-                    Counter = Counter.None("The limit is a tracking budget set by the analysis, and Space-Saving admission bounds the error; it is not a property of the process."),
-                    FalsifiedBy =
-                    [
-                        new FalsificationTest
-                        {
-                            Kind = FalsificationKind.CodeInspection,
-                            Test = "Re-run with a larger MaxReferenceAddresses; if the highly referenced objects stay the same, the cap did not change the findings.",
-                        },
-                    ],
-                    Analyzer = AnalyzerName,
-                    Category = "Diagnostics",
-                    Severity = Severity.Info,
-                    Title = "Reference tracking was capped",
-                    Narrative = $"{approximatedReferenceAddresses:N0} references have approximated, bounded-error counts because the " +
-                                "tracking limit was reached (Space-Saving admission — never dropped entirely).",
-                    Recommendation = "Increase MaxReferenceAddresses for exact incoming-reference coverage on more addresses.",
-                    Tags = ["analysis-quality", "references"],
-                    MetricValue = approximatedReferenceAddresses,
-                    MetricUnit = "references",
-                    DerivedFrom = [population.Id],
-                    Confidence = ConfidenceBreakdown.MeasurementCertain,
-                });
-            }
-        }
+        // Approximate reference counts are coverage, not a claim about the dump: see DominatorCoverageRule.
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }

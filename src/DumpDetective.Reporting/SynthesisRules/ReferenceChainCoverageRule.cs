@@ -32,18 +32,18 @@ internal sealed class ReferenceChainCoverageRule : ICoverageRule
         long traversalLimited = (long)population.Measures["traversal-limited.count"].Value;
 
         if (analyzed == 0)
-            return [PartialRecord(population, reached: 0, total: 0, limit: "no valid sample instance for the configured top types")];
+            return [PartialRecord(population, affected: 0, total: 0, limit: "no valid sample instance was found for the configured top types")];
 
         if (traversalLimited == 0)
             return [];
 
-        return [PartialRecord(population, reached: analyzed - traversalLimited, total: analyzed, limit: "path or depth budget")];
+        return [PartialRecord(population, affected: traversalLimited, total: analyzed, limit: "hit the path or depth budget")];
     }
 
-    private static CoverageRecord PartialRecord(Observation population, long reached, long total, string limit) => new(
+    private static CoverageRecord PartialRecord(Observation population, long affected, long total, string limit) => new(
         new Capability(CapabilityVocabulary.HeapRootPaths),
         population.Provenance.Artifact,
         CoverageStatus.Partial,
         [new CoverageImpact(AnalyzerName, CoverageImpactKind.Limited)],
-        new CoverageBoundary(reached, total, SampleUnit, limit));
+        new CoverageBoundary(affected, total, SampleUnit, limit));
 }

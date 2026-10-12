@@ -1,5 +1,5 @@
 rule: dominator.finding-parity
-version: 1
+version: 2
 [
   {
     "name": "critical-retention-with-complete-counting",
@@ -248,40 +248,6 @@ version: 1
             "test": "If App.Hub is a shared lookup object referenced widely by design, many incoming references are expected."
           }
         ]
-      },
-      {
-        "fingerprint": "dominator analysis::reference-tracking-capped",
-        "severity": "Info",
-        "assertion": {
-          "predicate": "Missing",
-          "measure": {
-            "value": 40,
-            "unit": "Count",
-            "semantics": "Count"
-          },
-          "qualifiers": {
-            "location": "incoming-reference counts",
-            "scope": "addresses past the tracking limit"
-          }
-        },
-        "support": [
-          {
-            "observations": [
-              "observations[1]"
-            ],
-            "why": "40 references have approximated, bounded-error counts."
-          }
-        ],
-        "counter": {
-          "statements": [],
-          "noneFoundBecause": "The limit is a tracking budget set by the analysis, and Space-Saving admission bounds the error; it is not a property of the process."
-        },
-        "falsifiedBy": [
-          {
-            "kind": "CodeInspection",
-            "test": "Re-run with a larger MaxReferenceAddresses; if the highly referenced objects stay the same, the cap did not change the findings."
-          }
-        ]
       }
     ]
   },
@@ -383,41 +349,6 @@ version: 1
   },
   {
     "name": "reference-tracking-capped",
-    "claims": [
-      {
-        "fingerprint": "dominator analysis::reference-tracking-capped",
-        "severity": "Info",
-        "assertion": {
-          "predicate": "Missing",
-          "measure": {
-            "value": 25,
-            "unit": "Count",
-            "semantics": "Count"
-          },
-          "qualifiers": {
-            "location": "incoming-reference counts",
-            "scope": "addresses past the tracking limit"
-          }
-        },
-        "support": [
-          {
-            "observations": [
-              "observations[0]"
-            ],
-            "why": "25 references have approximated, bounded-error counts."
-          }
-        ],
-        "counter": {
-          "statements": [],
-          "noneFoundBecause": "The limit is a tracking budget set by the analysis, and Space-Saving admission bounds the error; it is not a property of the process."
-        },
-        "falsifiedBy": [
-          {
-            "kind": "CodeInspection",
-            "test": "Re-run with a larger MaxReferenceAddresses; if the highly referenced objects stay the same, the cap did not change the findings."
-          }
-        ]
-      }
-    ]
+    "claims": []
   }
 ]

@@ -1,5 +1,5 @@
 rule: string.finding-parity
-version: 1
+version: 2
 [
   {
     "name": "extreme-duplication-small-sample",
@@ -282,41 +282,6 @@ version: 1
   },
   {
     "name": "low-sampling-coverage",
-    "claims": [
-      {
-        "fingerprint": "string analysis::low-sampling-coverage",
-        "severity": "Info",
-        "assertion": {
-          "predicate": "Missing",
-          "measure": {
-            "value": 3,
-            "unit": "Percent",
-            "semantics": "Ratio"
-          },
-          "qualifiers": {
-            "location": "string deduplication analysis",
-            "scope": "strings within the maximum duplicate-string length"
-          }
-        },
-        "support": [
-          {
-            "observations": [
-              "observations[0]"
-            ],
-            "why": "Deduplication saw 3,000 strings, 3.0% of all strings."
-          }
-        ],
-        "counter": {
-          "statements": [],
-          "noneFoundBecause": "Coverage is bounded by how many strings fall within the maximum duplicate-string length, not by a sampling budget, so more run time would not raise it."
-        },
-        "falsifiedBy": [
-          {
-            "kind": "CodeInspection",
-            "test": "Re-run with a larger MaxDuplicateStringLength; if coverage rises above 5%, the gap was the length cap, not the heap."
-          }
-        ]
-      }
-    ]
+    "claims": []
   }
 ]

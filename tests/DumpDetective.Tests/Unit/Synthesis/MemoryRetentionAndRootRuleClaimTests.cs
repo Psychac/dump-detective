@@ -138,12 +138,29 @@ public sealed class MemoryRetentionAndRootRuleClaimTests
     }
 
     [Fact]
-    public async Task GCRoot_WalkCapIsAMissingClaim_NotAProblemWithTheProcess()
+    public async Task GCRoot_WalkCapIsNoLongerAClaim_ItIsCoverage()
     {
-        Claim claim = (await RunAsync(new GCRootSynthesisRule(), [RootPopulation(capped: 7)])).Single();
+        IReadOnlyList<Claim> claims = await RunAsync(new GCRootSynthesisRule(), [RootPopulation(capped: 7)]);
 
-        claim.Assertion!.Predicate.Should().Be(AssertionPredicate.Missing);
-        claim.Assertion.Measure!.Value.Value.Should().Be(7);
+        claims.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GCRootCoverage_WalkCap_IsPartialWithAnUnknownTotal()
+    {
+        IReadOnlyList<CoverageRecord> records = new GCRootCoverageRule()
+            .Evaluate(new ObservationMatchSet([RootPopulation(capped: 7)]), new SynthesisContext());
+
+        CoverageRecord record = records.Should().ContainSingle().Subject;
+        record.Capability.Key.Should().Be(CapabilityVocabulary.HeapReferences);
+        record.Status.Should().Be(CoverageStatus.Partial);
+        record.Boundary.Should().Be(new CoverageBoundary(7, null, "root-owned subgraphs", "were truncated at the node or depth budget"));
+    }
+
+    [Fact]
+    public void GCRootCoverage_NoCap_ProducesNoRecord()
+    {
+        new GCRootCoverageRule().Evaluate(new ObservationMatchSet([RootPopulation()]), new SynthesisContext()).Should().BeEmpty();
     }
 
     // ── ReferenceChain ───────────────────────────────────────────────────────
@@ -194,7 +211,7 @@ public sealed class MemoryRetentionAndRootRuleClaimTests
         CoverageRecord record = records.Should().ContainSingle().Subject;
         record.Capability.Key.Should().Be(CapabilityVocabulary.HeapRootPaths);
         record.Status.Should().Be(CoverageStatus.Partial);
-        record.Boundary.Should().Be(new CoverageBoundary(7, 10, "sampled types", "path or depth budget"));
+        record.Boundary.Should().Be(new CoverageBoundary(3, 10, "sampled types", "hit the path or depth budget"));
         record.Impacts.Should().ContainSingle().Which.Should().Be(new CoverageImpact("Reference Chain Analysis", CoverageImpactKind.Limited));
     }
 
@@ -205,7 +222,7 @@ public sealed class MemoryRetentionAndRootRuleClaimTests
             .Evaluate(new ObservationMatchSet([ChainPopulation(0, 0, 0, 0)]), new SynthesisContext());
 
         records.Should().ContainSingle().Which.Boundary.Should().Be(
-            new CoverageBoundary(0, 0, "sampled types", "no valid sample instance for the configured top types"));
+            new CoverageBoundary(0, 0, "sampled types", "no valid sample instance was found for the configured top types"));
     }
 
     [Fact]

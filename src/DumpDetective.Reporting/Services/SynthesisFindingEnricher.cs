@@ -178,9 +178,13 @@ internal sealed class SynthesisFindingEnricher
         return false;
     }
 
-    private static string LimitingFactorText(CoverageRecord record) => record.Boundary is { } boundary
-        ? $"{record.Capability} coverage is partial: {boundary.Reached:N0} of {boundary.Total:N0} {boundary.Unit} before the {boundary.Limit}."
-        : $"{record.Capability} coverage is partial.";
+    private static string LimitingFactorText(CoverageRecord record) => record.Boundary switch
+    {
+        { Total: 0 } boundary => $"{record.Capability} coverage is partial: no {boundary.Unit} available ({boundary.Limit}).",
+        { Total: { } total } boundary => $"{record.Capability} coverage is partial: {boundary.Affected:N0} of {total:N0} {boundary.Unit} {boundary.Limit}.",
+        { } boundary => $"{record.Capability} coverage is partial: {boundary.Affected:N0} {boundary.Unit} {boundary.Limit}.",
+        null => $"{record.Capability} coverage is partial.",
+    };
 }
 
 internal readonly record struct SynthesisEnrichment(

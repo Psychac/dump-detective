@@ -28,7 +28,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
     private const string AnalyzerName = "GC Root Analysis";
 
     public string RuleId => "gc-root.finding-parity";
-    public int Version => 1;
+    public int Version => 2;
 
     public ObservationQuery Query { get; } = new()
     {
@@ -249,46 +249,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
             });
         }
 
-        // ── Root-owned subgraph walk cap signal ──────────────────────────────────
-        if (population is not null
-            && population.Measures["subgraph-walk-capped"].Value >= 1.0
-            && population.Measures["subgraph-walk-capped.count"].Value > 0)
-        {
-            int cappedCount = (int)population.Measures["subgraph-walk-capped.count"].Value;
-
-            findings.Add(new Claim
-            {
-                Fingerprint = Fingerprint("subgraph-walk-capped"),
-                Assertion = new Assertion
-                {
-                    Predicate = AssertionPredicate.Missing,
-                    Measure = ClaimParts.Count(cappedCount),
-                    Qualifiers = new AssertionQualifiers { Location = "root-owned subgraph walk", Scope = "subgraphs truncated at the node or depth budget" },
-                },
-                Support = [new EvidenceStatement([population.Id], $"The traversal hit its node or depth budget on {cappedCount:N0} root-owned subgraphs.")],
-                Counter = Counter.None("The cap is a budget set by the analysis, so a larger budget would change what is reported; it is not a property of the process."),
-                FalsifiedBy =
-                [
-                    new FalsificationTest
-                    {
-                        Kind = FalsificationKind.CodeInspection,
-                        Test = "Re-run with a larger subgraph walk budget; if the retained totals barely change, the truncation was not material.",
-                    },
-                ],
-                Analyzer = AnalyzerName,
-                Category = "Confidence",
-                Severity = Severity.Info,
-                Title = $"Root-owned subgraph walk capped ({cappedCount} subgraphs truncated)",
-                Narrative = $"BFS traversal hit the {cappedCount} node/depth budget for some root-owned subgraphs. " +
-                            "The reported subgraph shape may be incomplete for deeply nested object graphs.",
-                Recommendation = "Results are indicative — large object graphs may retain more than shown.",
-                Tags = ["gc", "roots", "confidence", "cap"],
-                MetricValue = cappedCount,
-                MetricUnit = "subgraphs",
-                DerivedFrom = [population.Id],
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
-            });
-        }
+        // The subgraph walk cap is coverage, not a claim about the dump: see GCRootCoverageRule.
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }

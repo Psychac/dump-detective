@@ -19,7 +19,10 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>20 as of 2026-10-12 (<see cref="Artifacts.CoverageRecord.Capability"/> became nullable and
+    /// <summary>22 as of 2026-10-12 (<see cref="Artifacts.CoverageBoundary.Affected"/> became nullable, for a limit on a scan as a whole with no count — M3 step 5).
+    /// Before that, 21 as of 2026-10-12 (added <see cref="Artifacts.CoverageStatus.NotSupplied"/> — a missing capability whose whole family no
+    /// artifact in the session provides, so a dump-only run does not read as a gap in the dump; M3 step 5).
+    /// Before that, 20 as of 2026-10-12 (<see cref="Artifacts.CoverageRecord.Capability"/> became nullable and
     /// <see cref="Artifacts.CoverageImpactKind.Failed"/> was added, for a failed analyzer, which belongs to no capability;
     /// <see cref="Synthesis.SynthesisContext.AnalyzerRunSummary"/> was replaced by <see cref="Synthesis.SynthesisContext.FailedAnalyzers"/>,
     /// the names the one rule that read the counts needs as coverage — M3 step 4).
@@ -125,7 +128,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 20;
+    public const int Minor = 22;
 
     public static string AsString => $"{Major}.{Minor}";
 }

@@ -68,6 +68,7 @@ globalThis.history = { replaceState() { } };
 
 const templates = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/DumpDetective.Reporting/Templates');
 const entities = await import(pathToFileURL(path.join(templates, 'report.renderers.entities.js')).href);
+const panels = await import(pathToFileURL(path.join(templates, 'report.renderers.panels.js')).href);
 
 // Fact kinds are indexes into entitySummary.factKinds; a group is [factKindIndex, count, stats].
 function documentWith(entity, factKinds, groups) {
@@ -384,4 +385,51 @@ test('dominance relations name the side: dominators list what they dominate, dom
   // Page is entity 0 = the dominated type; its dominator has the higher id, so the stored source is reversed.
   const asDominated = openRelationsPage({ kind: 'Type', joinKey: 'App.Item' }, [{ kind: 'Type', joinKey: 'App.Holder' }], [[0, 1, [1]]], sources);
   assert.equal(asDominated.groups[0].children[0].textContent, 'Types (1) \u00b7 this is immediately dominated by it');
+});
+
+// ── Coverage strip and panel ─────────────────────────────────────────────────
+
+function coverageDocument(groups, headline) {
+  return { coverageView: { headline: headline || 'Coverage: 2 of 2 capabilities complete; no analyzer failed.', groups: groups } };
+}
+
+test('coverage strip is absent when the document has no coverage view', function () {
+  assert.equal(panels.buildCoverageStrip({}), null);
+});
+
+test('coverage strip states the headline and is calm when only complete and not-supplied groups exist', function () {
+  const strip = panels.buildCoverageStrip(coverageDocument([
+    { kind: 'not-supplied', title: 'Not supplied', lines: [{ text: 'No trace was supplied: 9 capabilities', claims: [] }] },
+    { kind: 'complete', title: 'Complete', lines: [{ text: 'heap.types', claims: [] }] },
+  ]));
+  assert.match(strip.textContent, /Coverage: 2 of 2 capabilities complete/);
+  assert.match(strip.className, /coverage-strip--ok/);
+  assert.doesNotMatch(strip.className, /coverage-strip--gap/);
+});
+
+test('coverage strip is flagged when a limit, failure or real gap exists', function () {
+  for (const kind of ['limited', 'failed', 'unavailable']) {
+    const strip = panels.buildCoverageStrip(coverageDocument([{ kind: kind, title: kind, lines: [{ text: 'x', claims: [] }] }]));
+    assert.match(strip.className, /coverage-strip--gap/, kind);
+  }
+});
+
+test('appendix shows the coverage panel with each group, its claim links and the complete capabilities as one line', function () {
+  const doc = coverageDocument([
+    { kind: 'limited', title: 'Limited by their own budgets', lines: [{ text: 'heap.root-paths: 8 of 10 sampled types hit the budget.', claims: ['reference chain analysis::retention-coverage'] }] },
+    { kind: 'complete', title: 'Complete', lines: [{ text: 'heap.types', claims: [] }, { text: 'heap.objects', claims: [] }] },
+  ]);
+  const appendix = panels.buildAppendix(doc);
+  assert.ok(appendix, 'appendix exists with only a coverage view');
+  assert.match(appendix.textContent, /Limited by their own budgets \(1\)/);
+  assert.match(appendix.textContent, /heap\.root-paths: 8 of 10 sampled types hit the budget\./);
+  assert.match(appendix.textContent, /heap\.types, heap\.objects/);
+  const link = appendix.descendants().find(function (n) { return n.tag === 'a'; });
+  assert.ok(link, 'the limited line links to the claim it limits');
+  assert.match(link.href, /^#finding-/);
+  assert.equal(link.textContent, 'reference chain analysis::retention-coverage');
+});
+
+test('appendix is absent when there is neither an appendix nor a coverage view', function () {
+  assert.equal(panels.buildAppendix({}), null);
 });

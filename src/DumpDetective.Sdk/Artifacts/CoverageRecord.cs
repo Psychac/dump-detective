@@ -6,8 +6,8 @@ using DumpDetective.Sdk.Synthesis;
 namespace DumpDetective.Sdk.Artifacts;
 
 /// <summary>
-/// How much of a capability a session actually had. Only <see cref="Complete"/> and
-/// <see cref="Unavailable"/> are produced from capability availability alone; the rest are reserved for
+/// How much of a capability a session actually had. Only <see cref="Complete"/>, <see cref="Unavailable"/> and
+/// <see cref="NotSupplied"/> are produced from capability availability alone; the rest are reserved for
 /// the steps that know how far an analyzer got (docs/ReportStructure/m3-coverage-plan.md steps 3-4).
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<CoverageStatus>))]
@@ -20,8 +20,14 @@ public enum CoverageStatus
     Skipped,
     Failed,
 
-    /// <summary>No artifact in the session provides the capability.</summary>
+    /// <summary>The session has an artifact of the capability's family but it does not provide this capability: a real gap.</summary>
     Unavailable,
+
+    /// <summary>
+    /// No artifact in the session provides any capability of this family (for example <c>trace.*</c> in a dump-only run), so nothing
+    /// was supplied to measure. Not a gap in what was supplied; the reader should not read it as one.
+    /// </summary>
+    NotSupplied,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<CoverageImpactKind>))]
@@ -44,8 +50,10 @@ public enum CoverageImpactKind
 /// Which part of a scan a limit touched: <paramref name="Affected"/> of <paramref name="Total"/> <paramref name="Unit"/> followed by
 /// <paramref name="Limit"/>, a verb phrase ("hit the path or depth budget"). <paramref name="Total"/> is null when the analyzer does not
 /// know the population; zero means nothing was available to scan, and <paramref name="Limit"/> then says why.
+/// <paramref name="Affected"/> is null when the limit applies to the scan as a whole and no count exists ("incoming-reference counting
+/// was skipped"), in which case <paramref name="Unit"/> names the scan itself.
 /// </summary>
-public sealed record CoverageBoundary(long Affected, long? Total, string Unit, string Limit);
+public sealed record CoverageBoundary(long? Affected, long? Total, string Unit, string Limit);
 
 /// <summary>An analyzer affected by a missing capability. <paramref name="Fidelity"/> is set only for <see cref="CoverageImpactKind.ReducedFidelity"/>.</summary>
 public sealed record CoverageImpact(string Analyzer, CoverageImpactKind Kind, FidelityBoost? Fidelity = null);

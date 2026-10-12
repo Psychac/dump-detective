@@ -229,6 +229,29 @@ public sealed class HandlesAsyncAndRetentionRuleClaimTests
     }
 
     [Fact]
+    public void DominatorCoverage_CountingSkipped_IsPartialForTheScanAsAWhole()
+    {
+        IReadOnlyList<CoverageRecord> records = new DominatorCoverageRule()
+            .Evaluate(new ObservationMatchSet([DomPopulation(highlyReferenced: 0, countingSkipped: true)]), new SynthesisContext());
+
+        CoverageBoundary boundary = records.Should().ContainSingle().Subject.Boundary!;
+        boundary.Affected.Should().BeNull();
+        boundary.Unit.Should().Be("incoming-reference counting");
+        boundary.Limit.Should().Contain("skipped");
+    }
+
+    [Fact]
+    public void DominatorCoverage_ObjectScanCapped_IsPartialAndSkippedWinsWhenBothHold()
+    {
+        var rule = new DominatorCoverageRule();
+
+        rule.Evaluate(new ObservationMatchSet([DomPopulation(0, scanCapped: true)]), new SynthesisContext())
+            .Single().Boundary!.Limit.Should().Contain("object-scan cap");
+        rule.Evaluate(new ObservationMatchSet([DomPopulation(0, scanCapped: true, countingSkipped: true)]), new SynthesisContext())
+            .Single().Boundary!.Limit.Should().Contain("skipped");
+    }
+
+    [Fact]
     public void DominatorCoverage_ExactCounts_ProducesNoRecord()
     {
         new DominatorCoverageRule().Evaluate(new ObservationMatchSet([DomPopulation(highlyReferenced: 3)]), new SynthesisContext()).Should().BeEmpty();
@@ -368,13 +391,13 @@ public sealed class HandlesAsyncAndRetentionRuleClaimTests
             ["shallow.bytes"] = Bytes(estimatedBytes / 2),
         }) with { Subjects = [Type(type)] };
 
-    private static Observation DomPopulation(long highlyReferenced, long approximated = 0, bool scanCapped = false) =>
+    private static Observation DomPopulation(long highlyReferenced, long approximated = 0, bool scanCapped = false, bool countingSkipped = false) =>
         RuleShapeGolden.Observation("type.retention-population", "Dominator Analysis", new()
         {
             ["highly-referenced.count"] = Count(highlyReferenced),
             ["approximated-reference-addresses.count"] = Count(approximated),
             ["is-object-scan-capped"] = Count(scanCapped ? 1 : 0),
-            ["is-reference-counting-skipped"] = Count(0),
+            ["is-reference-counting-skipped"] = Count(countingSkipped ? 1 : 0),
             ["top-highly-referenced.has-root-path"] = Count(1),
             ["top-highly-referenced.is-root-path-search-truncated"] = Count(0),
             ["top-highly-referenced.evidence-signal.count"] = Count(1),

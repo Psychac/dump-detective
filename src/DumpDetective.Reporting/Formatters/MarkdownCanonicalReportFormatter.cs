@@ -71,6 +71,8 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 sb);
         }
 
+        RenderCoverage(doc.CoverageView, sb);
+
         RenderClaims(doc.Findings, sb);
 
         if (doc.IncidentContext is { } ctx)
@@ -235,6 +237,32 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         }
 
         sb.AppendLine();
+    }
+
+    private static void RenderCoverage(CoverageView? coverage, StringBuilder sb)
+    {
+        if (coverage is null)
+            return;
+
+        sb.AppendLine("## Coverage");
+        sb.AppendLine();
+        sb.AppendLine(coverage.Headline);
+        sb.AppendLine();
+        foreach (CoverageGroupView group in coverage.Groups)
+        {
+            if (group.Kind == "complete")
+            {
+                sb.AppendLine($"**{group.Title}** ({group.Lines.Count}): {string.Join(", ", group.Lines.Select(l => l.Text))}");
+                sb.AppendLine();
+                continue;
+            }
+
+            sb.AppendLine($"**{group.Title}**");
+            sb.AppendLine();
+            foreach (CoverageLineView line in group.Lines)
+                sb.AppendLine($"- {line.Text}");
+            sb.AppendLine();
+        }
     }
 
     private static void RenderClaims(IReadOnlyList<FindingRecord> findings, StringBuilder sb)

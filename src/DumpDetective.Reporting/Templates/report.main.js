@@ -129,6 +129,9 @@ async function bootstrap() {
     }
   }
 
+  const coverageStrip = R.buildCoverageStrip(doc);
+  if (coverageStrip) main.appendChild(coverageStrip);
+
   const actionQueue = R.buildActionQueuePanel(doc);
   if (actionQueue) {
     main.appendChild(actionQueue);

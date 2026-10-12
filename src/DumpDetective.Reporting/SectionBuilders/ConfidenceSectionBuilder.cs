@@ -99,8 +99,6 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         }
 
         var limitationRows = new List<TableRow>();
-        AddLimitation(limitationRows, "Retention", results.Get<DominatorDomainResult>() is DominatorDomainResult retention && (retention.ApproximatedReferenceAddresses > 0 || retention.ObjectScanCapped || retention.ReferenceCountingSkipped), BuildRetentionText(results.Get<DominatorDomainResult>()));
-        AddLimitation(limitationRows, "GC roots", results.Get<GCRootDomainResult>() is GCRootDomainResult gcRoot && (gcRoot.SubgraphWalkCapped || gcRoot.SubgraphWalkCappedCount > 0), BuildRootText(results.Get<GCRootDomainResult>()));
         AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && !hang.RuntimeThreadPoolDataAvailable, BuildHangText(results.Get<HangDomainResult>()));
 
         if (limitationRows.Count > 0)
@@ -132,34 +130,6 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
             Cell(area),
             Cell("Yes"),
             Cell(text)));
-    }
-
-    private static string BuildRetentionText(DominatorDomainResult? retention)
-    {
-        if (retention is null)
-            return "No retention analyzer result available.";
-
-        if (retention.ReferenceCountingSkipped)
-            return "Incoming-reference counting was skipped because the disk-backed index would make full reverse counting too expensive.";
-
-        if (retention.ObjectScanCapped)
-            return "Incoming-reference counting hit the object-scan cap (MaxLeakScanObjects); highly-referenced-object counts may be partial.";
-
-        if (retention.ApproximatedReferenceAddresses > 0)
-            return $"Reference counting approximated {retention.ApproximatedReferenceAddresses:N0} addresses' counts (bounded-error, not dropped) after the tracking-table capacity was reached.";
-
-        return "Retention metrics are bounded but available.";
-    }
-
-    private static string BuildRootText(GCRootDomainResult? gcRoot)
-    {
-        if (gcRoot is null)
-            return "No GC root result available.";
-
-        if (gcRoot.SubgraphWalkCapped)
-            return $"GC root path search was capped after {gcRoot.SubgraphWalkCappedCount:N0} targets; deeper paths may be missing.";
-
-        return "GC root paths are bounded and selective.";
     }
 
     private static string BuildHangText(HangDomainResult? hang)

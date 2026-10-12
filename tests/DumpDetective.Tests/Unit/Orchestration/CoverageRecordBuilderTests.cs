@@ -34,7 +34,7 @@ public sealed class CoverageRecordBuilderTests
             session, CapabilityResolver.Resolve([new NeedsTraceGcEvents()], session.AvailableCapabilities));
 
         CoverageRecord missing = records.Single(r => r.Capability == CapabilityVocabulary.TraceGcEvents);
-        missing.Status.Should().Be(CoverageStatus.Unavailable);
+        missing.Status.Should().Be(CoverageStatus.NotSupplied);
         missing.Artifact.Should().BeNull();
         missing.Impacts.Should().ContainSingle().Which.Should().Be(new CoverageImpact(nameof(NeedsTraceGcEvents), CoverageImpactKind.NotRun));
     }
@@ -80,6 +80,30 @@ public sealed class CoverageRecordBuilderTests
             .Which.Impacts.Should().HaveCount(2);
     }
 
+    [Fact]
+    public void Build_MarksAMissingCapabilityUnavailable_WhenAnArtifactOfItsFamilyIsPresent()
+    {
+        ArtifactDescriptor dump = Artifact("dump-1", "clr-dump", CapabilityVocabulary.HeapObjects);
+        AnalysisSession session = new([dump], dump.Provides);
+
+        IReadOnlyList<CoverageRecord> records = CoverageRecordBuilder.Build(
+            session, CapabilityResolver.Resolve([new NeedsHeapTypes()], session.AvailableCapabilities));
+
+        records.Single(r => r.Capability == CapabilityVocabulary.HeapTypes).Status.Should().Be(CoverageStatus.Unavailable);
+    }
+
+    [Fact]
+    public void Build_MarksAMissingTraceCapabilityUnavailable_WhenATraceIsPresentButLacksIt()
+    {
+        ArtifactDescriptor trace = Artifact("trace-1", "nettrace", CapabilityVocabulary.TraceGcEvents);
+        AnalysisSession session = new([trace], trace.Provides);
+
+        IReadOnlyList<CoverageRecord> records = CoverageRecordBuilder.Build(
+            session, CapabilityResolver.Resolve([new NeedsTraceCpuSamples()], session.AvailableCapabilities));
+
+        records.Single(r => r.Capability == CapabilityVocabulary.TraceCpuSamples).Status.Should().Be(CoverageStatus.Unavailable);
+    }
+
     private static ArtifactDescriptor Artifact(string id, string sourceKind, params string[] provides) => new()
     {
         Id = new ArtifactId(id),
@@ -103,6 +127,22 @@ public sealed class CoverageRecordBuilderTests
     private sealed class PrefersTraceGcEvents : IAnalyzer
     {
         public string Name => nameof(PrefersTraceGcEvents);
+        public string Category => "Test";
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    }
+
+    [RequiresCapability(CapabilityVocabulary.HeapTypes)]
+    private sealed class NeedsHeapTypes : IAnalyzer
+    {
+        public string Name => nameof(NeedsHeapTypes);
+        public string Category => "Test";
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    }
+
+    [RequiresCapability(CapabilityVocabulary.TraceCpuSamples)]
+    private sealed class NeedsTraceCpuSamples : IAnalyzer
+    {
+        public string Name => nameof(NeedsTraceCpuSamples);
         public string Category => "Test";
         public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken) => ValueTask.CompletedTask;
     }

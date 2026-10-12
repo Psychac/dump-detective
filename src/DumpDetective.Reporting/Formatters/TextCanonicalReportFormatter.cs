@@ -50,6 +50,8 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             RenderExecutiveSummaryText(executiveSummary, sb);
         }
 
+        RenderCoverage(doc.CoverageView, sb);
+
         RenderClaims(doc.Findings, sb);
 
         if (doc.IncidentContext is { } ctx)
@@ -93,6 +95,29 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         }
 
         return sb.ToString();
+    }
+
+    private static void RenderCoverage(CoverageView? coverage, StringBuilder sb)
+    {
+        if (coverage is null)
+            return;
+
+        sb.AppendLine("COVERAGE");
+        sb.AppendLine(coverage.Headline);
+        foreach (CoverageGroupView group in coverage.Groups)
+        {
+            if (group.Kind == "complete")
+            {
+                sb.AppendLine($"  {group.Title} ({group.Lines.Count}): {string.Join(", ", group.Lines.Select(l => l.Text))}");
+                continue;
+            }
+
+            sb.AppendLine($"  {group.Title}:");
+            foreach (CoverageLineView line in group.Lines)
+                sb.AppendLine($"    - {line.Text}");
+        }
+
+        sb.AppendLine();
     }
 
     private static void RenderClaims(IReadOnlyList<FindingRecord> findings, StringBuilder sb)

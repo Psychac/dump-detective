@@ -28,7 +28,7 @@ internal sealed class BuildReportNode(ReportBuilderFacade reportBuilderFacade) :
             state.IncidentContext,
             state.Insights,
             state.EvidenceSourcesByFingerprint);
-        doc = doc with { Coverage = state.Coverage };
+        doc = doc with { Coverage = state.Coverage, CoverageView = CoverageProse.Build(state.Coverage) };
         state.ReportDocument = doc;
 
         context.Set(SingleDumpPipelineKeys.ReportDocument, doc);

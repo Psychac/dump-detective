@@ -87,7 +87,7 @@ internal sealed class TrendBuildReportNode(
             trendData);
 
         sessionState.Observations = executions.SelectMany(e => e.Observations).ToArray();
-        trendDoc = trendDoc with { Coverage = sessionState.Coverage };
+        trendDoc = trendDoc with { Coverage = sessionState.Coverage, CoverageView = CoverageProse.Build(sessionState.Coverage) };
         sessionState.ReportDocument = trendDoc;
         sessionState.Runs = executions.SelectMany(e => e.Runs).ToArray();
         sessionState.AnalysisElapsed = sessionState.PipelineStopwatch.Elapsed;

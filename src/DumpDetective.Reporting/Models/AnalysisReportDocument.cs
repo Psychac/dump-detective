@@ -101,6 +101,9 @@ internal abstract record AnalysisReportDocument
 
     /// <summary>Per-capability coverage of the session (docs/ReportStructure/m3-coverage-plan.md); null when the run did not resolve capabilities.</summary>
     public IReadOnlyList<DumpDetective.Sdk.Artifacts.CoverageRecord>? Coverage { get; init; } = null;
+
+    /// <summary>The wording of <see cref="Coverage"/> that every format renders; null when <see cref="Coverage"/> is.</summary>
+    public CoverageView? CoverageView { get; init; } = null;
     public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // optional executive summary
 
     /// <summary>Where the observations behind this report's findings were written; null when none were emitted.</summary>

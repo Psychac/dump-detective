@@ -5,13 +5,96 @@ import { findingAnchorId } from './report.renderers.shared.js';
 
 // ── Appendix (analyzer run summary, memory diagnostics, known limitations) ───
 
+// ── Coverage (headline strip + appendix panel) ───────────────────────────────
+// The wording is generated server-side (CoverageProse) so every format says the same thing; this only lays it out.
+
+const COVERAGE_PANEL_ID = 'appendix-coverage';
+
+export function buildCoverageStrip(doc) {
+  const view = doc.coverageView;
+  if (!view) return null;
+
+  const strip = el('section', 'section-card coverage-strip');
+  strip.id = 'coverage-strip';
+  strip.setAttribute('data-component-id', 'coverage-strip');
+
+  const hasGap = view.groups.some(g => g.kind === 'failed' || g.kind === 'limited' || g.kind === 'unavailable');
+  strip.classList.add(hasGap ? 'coverage-strip--gap' : 'coverage-strip--ok');
+
+  const text = el('p', 'coverage-strip__headline');
+  text.textContent = view.headline;
+  strip.appendChild(text);
+
+  const link = el('a', 'coverage-strip__link');
+  link.href = '#' + COVERAGE_PANEL_ID;
+  link.textContent = 'Coverage details';
+  link.addEventListener('click', function () {
+    const panel = document.getElementById(COVERAGE_PANEL_ID);
+    if (panel) panel.open = true;
+  });
+  strip.appendChild(link);
+  return strip;
+}
+
+function buildCoveragePanel(view) {
+  const panel = document.createElement('details');
+  panel.className = 'appendix-panel coverage-panel';
+  panel.id = COVERAGE_PANEL_ID;
+  panel.open = true;
+
+  const summary = document.createElement('summary');
+  const title = el('span', 'appendix-panel__title'); title.textContent = 'Coverage';
+  summary.appendChild(title);
+  panel.appendChild(summary);
+
+  const body = el('div', 'appendix-panel__body');
+  for (const group of view.groups) {
+    const block = el('div', 'coverage-group coverage-group--' + group.kind);
+    const heading = el('div', 'coverage-group__title');
+    heading.textContent = group.title + ' (' + group.lines.length + ')';
+    block.appendChild(heading);
+
+    if (group.kind === 'complete') {
+      const names = el('p', 'coverage-group__complete');
+      names.textContent = group.lines.map(l => l.text).join(', ');
+      block.appendChild(names);
+    } else {
+      const list = el('ul', 'coverage-group__lines');
+      for (const line of group.lines) {
+        const item = el('li', 'coverage-group__line');
+        item.appendChild(t(line.text));
+        const claims = line.claims || [];
+        if (claims.length) {
+          const refs = el('span', 'coverage-group__claims');
+          refs.appendChild(t(' Limits '));
+          claims.forEach(function (fingerprint, i) {
+            if (i) refs.appendChild(t(', '));
+            const a = el('a', 'coverage-group__claim');
+            a.href = '#' + findingAnchorId({ id: fingerprint });
+            a.textContent = fingerprint;
+            refs.appendChild(a);
+          });
+          item.appendChild(refs);
+        }
+        list.appendChild(item);
+      }
+      block.appendChild(list);
+    }
+    body.appendChild(block);
+  }
+  panel.appendChild(body);
+  return panel;
+}
+
 export function buildAppendix(doc) {
-  const appendix = doc.appendix;
+  const appendix = doc.appendix || (doc.coverageView ? {} : null);
   if (!appendix) return null;
 
   const sec = el('section', 'section-card report-appendix');
   sec.id = 'sec-appendix';
   sec.setAttribute('data-component-id', 'appendix');
+
+  if (doc.coverageView) sec.appendChild(buildCoveragePanel(doc.coverageView));
 
   // ── Z1. Analyzer Run Summary ─────────────────────────────────────────────
   const runs = appendix.analyzerRunSummary || [];

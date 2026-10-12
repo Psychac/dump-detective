@@ -250,6 +250,39 @@ public sealed class ModuleAnalyzerRetypingCharacterizationTests
         domainFacts.Single(o => o.Subjects[0].JoinKey == "/LM/W3SVC/1/ROOT").Measures["module.count"].Value.Should().Be(2);
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_EmitsOneMembershipFactPerDistinctNamedDomainModulePair_AndNoneForUnnamedOnes()
+    {
+        var modules = new FakeRuntimeModuleQuery();
+        modules.AddDomain(1, "DefaultDomain");
+        modules.AddDomain(3, "/LM/W3SVC/1/ROOT");
+        modules.AddDomain(4, "");
+        modules.AddDomainModule(1, 0x1000, "Shared.dll", "Shared, Version=1.0.0.0");
+        modules.AddDomainModule(3, 0x2000, "Shared.dll", "Shared, Version=1.0.0.0");
+        modules.AddDomainModule(3, 0x3000, "Shared.dll", "Shared, Version=1.0.0.0");
+        modules.AddDomainModule(3, 0x4000, "OnlyThere.dll", "OnlyThere, Version=1.0.0.0");
+        modules.AddDomainModule(3, 0x5000, "", "");
+        modules.AddDomainModule(4, 0x6000, "InUnnamedDomain.dll", "X, Version=1.0.0.0");
+        var sink = new CollectingObservationSink();
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new()
+        {
+            Observations = sink,
+            ArtifactId = new ArtifactId("test"),
+            RuntimeModules = modules,
+            DumpObjectFields = new FakeDumpObjectFieldQuery(),
+            HeapTypeStatistics = new FakeHeapTypeStatisticsQuery(),
+            AnalyzerOptions = new ModuleAnalysisOptions(),
+        };
+
+        await new ModuleAnalyzer().AnalyzeAsync(context, CancellationToken.None);
+
+        var pairs = sink.Observations.Where(o => o.ObservationType == "runtime.module-appdomain-membership").ToList();
+        pairs.Should().OnlyContain(o => o.Subjects.Count == 2 && o.Subjects[0] is ModuleRef && o.Subjects[1] is AppDomainRef && o.Measures.Count == 0);
+        pairs.Select(o => (o.Subjects[0].JoinKey, o.Subjects[1].JoinKey)).Should().BeEquivalentTo(
+            [("Shared.dll", "DefaultDomain"), ("Shared.dll", "/LM/W3SVC/1/ROOT"), ("OnlyThere.dll", "/LM/W3SVC/1/ROOT")],
+            "a module loaded twice in one domain is one pair; unnamed modules and domains relate nothing");
+    }
+
     private static async Task<ModuleDomainResult> Analyze(
         FakeRuntimeModuleQuery modules, FakeDumpObjectFieldQuery fields, FakeHeapTypeStatisticsQuery typeStats,
         ModuleAnalysisOptions? options = null)

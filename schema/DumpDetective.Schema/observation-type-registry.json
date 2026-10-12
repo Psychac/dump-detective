@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.96.0",
+  "registryVersion": "1.97.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -1182,6 +1182,26 @@
       },
       "note": "One per named AppDomain: modules loaded and the shallow bytes of the live instances of the types they declare (the Estimated Managed Bytes of the AppDomain inventory). Added with the AppDomain entity (M2c step 7).",
       "addedIn": "1.96.0"
+    },
+    "runtime.module-appdomain-membership": {
+      "producedBy": "ModuleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/ModuleAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "runtime.modules"],
+      "subjectKind": "module+appdomain",
+      "temporalKind": "point",
+      "measures": {},
+      "note": "One per distinct (named AppDomain, named module) pair, over every module of every domain: it relates a module to the domain it is loaded in. A module loaded in several domains gives one per domain. Added for the Relations panel (M2b step 3).",
+      "addedIn": "1.97.0"
+    },
+    "thread.appdomain-membership": {
+      "producedBy": "ThreadAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/ThreadAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": "thread+appdomain",
+      "temporalKind": "point",
+      "measures": {},
+      "note": "One per thread whose AppDomain has a name: it relates the thread to its domain. Added for the Relations panel (M2b step 3).",
+      "addedIn": "1.97.0"
     },
     "thread.appdomain-population": {
       "producedBy": "ThreadAnalyzer",

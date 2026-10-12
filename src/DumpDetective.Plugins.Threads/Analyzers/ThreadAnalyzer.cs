@@ -237,6 +237,30 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             }
         }
 
+        // Relates the thread to its domain (m2b-relations-plan.md, step 3). A thread with no named domain has nothing to relate, and a
+        // managed thread with no OS thread (OS id 0) has no identity to relate: every such thread would share the entity "thread 0".
+        private static async ValueTask EmitThreadAppDomainMembershipAsync(
+            RuntimeThreadRef thread, string domainName, AnalysisContext observationContext,
+            IReadOnlySet<Capability> observationCapabilities, CancellationToken cancellationToken)
+        {
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "thread.appdomain-membership",
+                Subjects = [thread.Thread, new AppDomainRef { Name = domainName, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>(),
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Thread Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
         // Silent when the dominator tree wasn't built or the thread had no stack roots: an absent observation
         // reads as "not measured", where emitting 0 would claim the thread keeps nothing alive.
         private static async ValueTask EmitThreadRetentionAsync(
@@ -286,6 +310,8 @@ namespace DumpDetective.Analysis.Analyzers.Threads
 
             string appDomain = thread.AppDomainName ?? NoAppDomainLabel;
             IncrementCount(result.AppDomainDistribution, appDomain);
+            if (thread.AppDomainName is { Length: > 0 } threadDomain && thread.Thread.OsThreadId != 0)
+                await EmitThreadAppDomainMembershipAsync(thread, threadDomain, observationContext, observationCapabilities, cancellationToken);
 
             if (thread.HasCurrentException)
             {

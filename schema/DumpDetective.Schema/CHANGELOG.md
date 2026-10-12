@@ -15,6 +15,12 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.97.0 — 2026-10-12
+
+M2b step 3: two relation facts, each with two subjects and no measures: `runtime.module-appdomain-membership` (module + AppDomain, one per distinct
+pair) and `thread.appdomain-membership` (thread + AppDomain, one per thread with a named domain). They exist so the dossier Relations panel can say
+which domain a module or thread belongs to. Additive; no `direction`.
+
 ## `observation.schema.json` and `observation-type-registry.json` 1.96.0 — 2026-10-08
 
 M2c step 7: a new subject kind, `appdomain` (`$kind: "appdomain"`, `kind: "AppDomain"`, `name`, optional `domainId`; the join key is the

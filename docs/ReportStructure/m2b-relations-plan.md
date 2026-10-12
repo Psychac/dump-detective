@@ -4,7 +4,7 @@ Follows [m2-entities-plan.md](m2-entities-plan.md) (D5, deferred) and [m2c-entit
 Tracked as milestone **M2b** in [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path). It fills the dossier's Relations
 slot, which today reads "Not built yet" (`entityRelations` in `report.renderers.entities.js`).
 
-**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-2 done 2026-10-09, steps 3-4 pending.
+**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-3 done (1-2 on 2026-10-09, 3 on 2026-10-12), step 4 pending.
 
 ## Goal
 
@@ -67,10 +67,14 @@ and all of those already exist.
      - **Real dump:** 86 merged bare-name Type entities became 175 distinct state-machine types (entities 14,590 to 14,679); no other entity changed; all 97,422 facts still placed, no summary row differs by name; every table cell links exactly as before; each `OnTick` method now relates to its own state machine; pairs 13,239 to 13,325; 0 warnings. Results: `m2-step1/verify-canon-results.txt`.
      - **Side effect, fixed 2026-10-09:** `DataTableLifecycleInsightRule` counted types whose name `Contains("DataRow")`, so the 178 `Enumerable+<CastIterator>d__<System.Data.DataRow>` iterators moved its "DataRow on heap" figure from 1,763,753 (constant over 20 earlier runs) to 1,763,931. The rule now matches exactly `System.Data.DataRow`, with a regression test for `DataRowView`, `DataRowCollection` and the iterator. The figure is now 1,642,434: the old number had always included about 121,000 lookalikes (104,767 `DataRowView`, `RBTree<DataRow>` nodes and pages, `DataRowCollection` and others). The claim's threshold (10,000) is unaffected here. Results: `m2-step1/verify-datarow-results.txt`. The `DataColumn` and `DataTable` finalizer checks in the same rule are exact matches too (same day): measured first, the finalizer observations name only `System.Data.DataColumn` (43,539 and 54,005) and `System.Data.DataTable` (743 and 1,258), so no figure moved; the claim is identical. Cost: a strongly typed DataTable subclass (a generated `OrdersDataTable`) is no longer counted, and none appeared here. Results: `m2-step1/verify-dtfinal-results.txt`.
      - **Trend:** not affected. Trend compares dumps analysed in one run, so every key comes from the same canonicalizer, and snapshots are not serialized ([schema-versioning.md](../schema-versioning.md)). An older `report.json` on disk keeps its old names; nothing reads it back.
-3. **Linking facts: module to AppDomain, thread to AppDomain** *(pending)*
-   - **Why separate:** the AppDomain tables hold modules and threads as text, so no row-based relation exists. `ModuleAnalyzer` already walks modules per domain.
-   - **How:** new fact kinds with two subjects (module + AppDomain, thread + AppDomain) rather than changing the shape of existing facts, because existing insight rules read subjects by position. Registry, schema changelog and conformance test updated as in M2c step 7a.
-   - **Open:** how many facts this adds (about 255 modules on the reference dump) against the observation volume the project watches.
+3. **Linking facts: module to AppDomain, thread to AppDomain** *(done 2026-10-12, verified on reference dump)*
+   - **Facts:** two new two-subject fact kinds with no measures, as planned (existing facts untouched, so rules reading subjects by position are unaffected): `runtime.module-appdomain-membership` (module + AppDomain) and `thread.appdomain-membership` (thread + AppDomain). Registry 1.97.0, changelog entry, conformance list; both map to the Identity panel.
+   - **Module side:** `ModuleAnalyzer` records each (named domain, named module) pair while it already walks every domain: all pairs, no cap, de-duplicated (a module loaded twice in one domain is one pair). A module loaded in several domains gives one pair per domain. The unnamed module and unnamed domains relate nothing (D3).
+   - **Thread side:** one fact per thread with a named domain **and an OS thread id**. A managed thread with OS id 0 is skipped: its identity is "thread 0", so every such thread would merge into one entity. The first run did create that entity (a managed thread, id 135, with no OS thread); the guard keeps the entity table unchanged.
+   - **Tests:** one analyzer test in each of the module and thread suites (de-duplication, unnamed skipped, OS id 0 skipped), 2 panel-mapping cases, registry conformance, harness 29 of 29 (1 new: a domain page lists its modules and threads, a module page lists its domain); full suite 1,773 passed, 66 skipped.
+   - **Real dump:** +298 observations (260 module-domain, 38 thread-domain); 298 pairs added by key, 0 lost, 0 re-sourced (13,325 to 13,623, 15 sources); entity table, summary rows (apart from the new facts) and claims identical; 0 warnings. The 260 module pairs cover 253 distinct modules: the web domain has 253 and the default domain 7, all 7 of which are also in the web domain. Threads split 9 and 29; all 38 thread entities have a domain. Results: `m2-step1/verify-m2b3-results.txt`.
+   - **Not explained:** one named module, `Microsoft.VisualBasic.dll`, has a footprint fact but appears in neither domain's module list, so it has no domain relation. Both enumerations take the module name from the same function, so the cause is not a naming difference; not investigated.
+   - **Answers the open question:** the AppDomain tables already link their domain cells (M2c 7a); a domain column in the module and thread tables is not needed now that the page shows the relation.
 4. **Typed entity relations** *(pending, investigate each source before committing to it)*
    - **Candidates:** retains and held-by-static (reference-chain and static-root data), subscribes-to (event-leak publisher and subscriber), GC root to target (the M2c step 7b decision named relations as the reason to revisit).
    - **Blocker to check first:** static-root detection never fires in the current code and its fix is held unmerged (see the project memory note), so held-by-static has no data until that is settled.
@@ -86,7 +90,6 @@ and all of those already exist.
 
 ## Open questions
 
-- Whether a thread's or module's AppDomain should also become a column in the existing tables once step 3 exists.
 
 ## Not in this plan
 

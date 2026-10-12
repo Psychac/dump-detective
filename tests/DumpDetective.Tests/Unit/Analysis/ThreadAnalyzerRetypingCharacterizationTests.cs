@@ -245,6 +245,23 @@ public sealed class ThreadAnalyzerRetypingCharacterizationTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_EmitsOneMembershipFactPerThreadWithANamedDomainAndAnOsThread()
+    {
+        var threads = new FakeRuntimeThreadQuery();
+        threads.AddThread(Thread(osId: 1, isAlive: true, appDomainName: "DefaultDomain"));
+        threads.AddThread(Thread(osId: 2, isAlive: false, appDomainName: "DefaultDomain"));
+        threads.AddThread(Thread(osId: 3, isAlive: true, appDomainName: null));
+        threads.AddThread(Thread(osId: 4, isAlive: true, appDomainName: ""));
+        threads.AddThread(Thread(osId: 0, isAlive: false, appDomainName: "DefaultDomain", managedThreadId: 135));
+
+        IReadOnlyList<Observation> observations = await AnalyzeCollectingObservations(threads, new FakeThreadRetentionDominatorQuery());
+
+        var pairs = observations.Where(o => o.ObservationType == "thread.appdomain-membership").ToList();
+        pairs.Should().OnlyContain(o => o.Subjects.Count == 2 && o.Subjects[0] is ThreadRef && o.Subjects[1] is AppDomainRef && o.Measures.Count == 0);
+        pairs.Select(o => (o.Subjects[0].JoinKey, o.Subjects[1].JoinKey)).Should().BeEquivalentTo([("1", "DefaultDomain"), ("2", "DefaultDomain")]);
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_NoThreads_ReturnsEmptyResult()
     {
         ThreadDomainResult result = await Analyze(new FakeRuntimeThreadQuery());

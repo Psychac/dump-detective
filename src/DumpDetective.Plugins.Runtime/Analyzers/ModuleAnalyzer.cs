@@ -200,6 +200,32 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             }, cancellationToken);
         }
 
+        foreach (AppDomainModuleMembership membership in result.DomainModules ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.module-appdomain-membership",
+                Subjects =
+                [
+                    new ModuleRef { SimpleName = membership.ModuleName, Fidelity = MatchFidelity.Exact },
+                    new AppDomainRef { Name = membership.DomainName, Fidelity = MatchFidelity.Exact },
+                ],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>(),
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Module Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
         await context.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
@@ -620,6 +646,8 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
         ulong dynamicModuleBytes = 0;
         int anonymousModuleCount = 0;
 
+        var memberships = new List<AppDomainModuleMembership>();
+        var seenMemberships = new HashSet<(string Domain, string Module)>();
         var moduleTypeData = new Dictionary<ulong, ModuleTypeAccumulator>(capacity: 256);
         var crossDomainData = new Dictionary<string, CrossDomainAccumulator>(capacity: 64);
 
@@ -639,6 +667,10 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             {
                 if (module.IsDynamic) { totalDynamicModules++; dynamicModuleBytes += module.Size; }
                 if (string.IsNullOrEmpty(module.Name)) anonymousModuleCount++;
+
+                if (!string.IsNullOrWhiteSpace(domain.Name) && !string.IsNullOrWhiteSpace(module.Name)
+                    && seenMemberships.Add((domain.Name, module.Name)))
+                    memberships.Add(new AppDomainModuleMembership(domain.Name, module.Name));
 
                 if (domainTopModules.Count < TopModulesPerDomainToShow)
                 {
@@ -702,7 +734,7 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 
         return new AppDomainAnalysisResult(
             domainCount, domainSnapshots, totalDynamicModules, dynamicModuleBytes, anonymousModuleCount,
-            moduleEntries, warnings, crossDomainLoads);
+            moduleEntries, warnings, crossDomainLoads, memberships);
     }
 
     // Cross-domain loads of framework/BCL modules (System.*, mscorlib, coreclr, ...) are expected --
@@ -724,7 +756,7 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     private sealed record AppDomainAnalysisResult(
         int TotalDomains, IReadOnlyList<AppDomainSnapshot> Domains, int TotalDynamicModules, ulong DynamicModuleBytes,
         int AnonymousModuleCount, IReadOnlyList<ModuleTypeCountEntry> TopModulesByTypeCount, IReadOnlyList<string> Warnings,
-        IReadOnlyList<CrossDomainModuleLoad> CrossDomainModuleLoads);
+        IReadOnlyList<CrossDomainModuleLoad> CrossDomainModuleLoads, IReadOnlyList<AppDomainModuleMembership> DomainModules);
 
     // ── Per-module heap footprint (replaces ModuleAggregator's ModuleId join) ────────────────────
 
@@ -880,7 +912,8 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             AnonymousModuleCount: appDomains.AnonymousModuleCount,
             TopModulesByTypeCount: appDomains.TopModulesByTypeCount,
             CrossDomainModuleLoads: appDomains.CrossDomainModuleLoads,
-            AssemblyRefVersionMismatches: state.AssemblyRefMismatches.Count > 0 ? state.AssemblyRefMismatches : null)
+            AssemblyRefVersionMismatches: state.AssemblyRefMismatches.Count > 0 ? state.AssemblyRefMismatches : null,
+            DomainModules: appDomains.DomainModules)
         {
             Warnings = MergeWarnings(state.Warnings, appDomains.Warnings),
         };

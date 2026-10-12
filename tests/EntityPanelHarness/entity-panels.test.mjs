@@ -343,3 +343,16 @@ test('a group whose every pair comes from one fact names the fact once on the gr
   const page = openRelationsPage({ kind: 'Method', joinKey: 'App.Foo::Run' }, [{ kind: 'Type', joinKey: 'System.A' }], [[0, 1, [0]]], ['fact: type.async-state-machine']);
   assert.equal(page.groups[0].children[0].textContent, 'Types (1) \u00b7 in fact type.async-state-machine');
 });
+
+test('an AppDomain page lists its modules and threads from membership facts, and a module page lists its domain', function () {
+  const others = [{ kind: 'Module', joinKey: 'b.dll' }, { kind: 'Module', joinKey: 'a.dll' }, { kind: 'Thread', joinKey: '24088' }];
+  const sources = ['fact: runtime.module-appdomain-membership', 'fact: thread.appdomain-membership'];
+  const page = openRelationsPage({ kind: 'AppDomain', joinKey: 'DefaultDomain' }, others, [[0, 1, [0]], [0, 2, [0]], [0, 3, [1]]], sources);
+  const labels = page.groups.map(function (g) { return g.children[0].textContent; });
+  assert.deepEqual(labels, ['Modules (2) \u00b7 in fact runtime.module-appdomain-membership', 'Threads (1) \u00b7 in fact thread.appdomain-membership']);
+  assert.deepEqual(groupItems(page.groups[0]).map(function (li) { return li.children[0].textContent; }), ['a.dll', 'b.dll']);
+
+  const modulePage = openRelationsPage({ kind: 'Module', joinKey: 'a.dll' }, [{ kind: 'AppDomain', joinKey: 'DefaultDomain' }], [[0, 1, [0]]], sources);
+  assert.equal(modulePage.groups[0].children[0].textContent, 'AppDomains (1) \u00b7 in fact runtime.module-appdomain-membership');
+  assert.equal(groupItems(modulePage.groups[0])[0].children[0].href, '#entity/appdomain/' + encodeURIComponent('DefaultDomain'));
+});

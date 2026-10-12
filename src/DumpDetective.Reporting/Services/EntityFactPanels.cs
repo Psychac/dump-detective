@@ -84,6 +84,8 @@ internal static class EntityFactPanels
         ["thread.appdomain-population"] = Activity,
         ["infra.http-handler-module"] = Identity,
         ["runtime.module-unknown-identity"] = Identity,
+        ["runtime.module-appdomain-membership"] = Identity,
+        ["thread.appdomain-membership"] = Identity,
         ["runtime.module-conflict-group"] = Identity,
         ["runtime.module-cross-domain-load"] = Identity,
         ["runtime.module-assemblyref-mismatch"] = Identity,

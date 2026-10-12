@@ -49,6 +49,9 @@ public sealed record ModuleTypeDensity(
     ulong TotalBytes,
     ulong BytesPerType);
 
+/// <summary>One module loaded in one named AppDomain; every pair, not a top-N, because each becomes a fact relating the two.</summary>
+internal sealed record AppDomainModuleMembership(string DomainName, string ModuleName);
+
 internal sealed record AppDomainSnapshot(
     string Name,
     ulong Address,
@@ -100,4 +103,5 @@ internal sealed record ModuleDomainResult(
     int AnonymousModuleCount = 0,
     IReadOnlyList<ModuleTypeCountEntry>? TopModulesByTypeCount = null,
     IReadOnlyList<CrossDomainModuleLoad>? CrossDomainModuleLoads = null,
-    IReadOnlyList<AssemblyRefVersionMismatch>? AssemblyRefVersionMismatches = null) : AnalyzerDomainResult;
+    IReadOnlyList<AssemblyRefVersionMismatch>? AssemblyRefVersionMismatches = null,
+    IReadOnlyList<AppDomainModuleMembership>? DomainModules = null) : AnalyzerDomainResult;

@@ -72,6 +72,7 @@ public sealed class EntitySummaryTests : IDisposable
     [InlineData("thread.appdomain-population", "Activity")]
     [InlineData("runtime.module-appdomain-membership", "Identity")]
     [InlineData("thread.appdomain-membership", "Identity")]
+    [InlineData("event.subscription", "Retention")]
     [InlineData("runtime.no-such-fact", "Other")]
     public void PanelFor_PlacesModuleFactsInTheirOwnPanels(string factKind, string expectedPanel) =>
         EntityFactPanels.PanelFor(factKind).Should().Be(expectedPanel);

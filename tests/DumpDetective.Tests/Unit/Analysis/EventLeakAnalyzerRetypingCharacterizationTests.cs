@@ -7,6 +7,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
 
 using FluentAssertions;
 
@@ -154,6 +155,33 @@ public sealed class EventLeakAnalyzerRetypingCharacterizationTests
 
         await analyzer.AnalyzeAsync(context, CancellationToken.None);
         return (EventLeakDomainResult)analyzer.LastResult!;
+    }
+
+    [Fact]
+    public async Task EmitObservations_OneSubscriptionFactPerGroupAndSubscriberType_PublisherFirst_WithEveryTypeCounted()
+    {
+        EventLeakGroupSnapshot Group(string publisher, string eventField, params (string Type, int Count)[] subscribers) => new(
+            publisher, eventField, IsStatic: false, MaxSeverityScore: 1, InstanceCount: 1, TotalSubscribers: subscribers.Sum(s => s.Count),
+            AverageSubscribers: 1, MinSubscribers: 1, MaxSubscribers: 1,
+            TopSubscriberTypes: subscribers.Select(s => new NameCountEntry(s.Type, s.Count)).ToList());
+        var result = new EventLeakDomainResult(
+            TotalEventLeakInstances: 2, TotalSubscribers: 4, StaticEventLeakCount: 0, InstanceEventLeakCount: 2,
+            TopLeakGroups:
+            [
+                Group("App.Publisher", "Changed", ("App.ViewA", 3), ("App.ViewB", 1)),
+                Group("App.Publisher", "Closed", ("App.ViewA", 5)),
+                Group("App.Empty", "Nothing"),
+            ]);
+        var sink = new CollectingObservationSink();
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() { Observations = sink, ArtifactId = new ArtifactId("test") };
+
+        await EventLeakAnalyzer.EmitObservationsAsync(context, result, CancellationToken.None);
+
+        var facts = sink.Observations.Where(o => o.ObservationType == "event.subscription").ToList();
+        facts.Should().HaveCount(3, "one per (group, subscriber type), none for a group with no subscriber types");
+        facts.Should().OnlyContain(o => o.Subjects.Count == 2 && o.Subjects[0].JoinKey == "App.Publisher");
+        facts.Select(o => (o.Evidence[0].Description, o.Subjects[1].JoinKey, o.Measures["subscription.count"].Value))
+            .Should().BeEquivalentTo([("Changed", "App.ViewA", 3d), ("Changed", "App.ViewB", 1d), ("Closed", "App.ViewA", 5d)]);
     }
 
     private sealed class FakeHeapTypeStatisticsQuery : IHeapTypeStatisticsQuery

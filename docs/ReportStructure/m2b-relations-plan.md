@@ -4,7 +4,7 @@ Follows [m2-entities-plan.md](m2-entities-plan.md) (D5, deferred) and [m2c-entit
 Tracked as milestone **M2b** in [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path). It fills the dossier's Relations
 slot, which today reads "Not built yet" (`entityRelations` in `report.renderers.entities.js`).
 
-**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-3 done (1-2 on 2026-10-09, 3 on 2026-10-12); step 4 measured 2026-10-12, 4a (subscribes-to) next.
+**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-3 done (1-2 on 2026-10-09, 3 on 2026-10-12); step 4 measured 2026-10-12, 4a (subscribes-to) done; 4b (dominator-tree) not started.
 
 ## Goal
 
@@ -87,10 +87,11 @@ and all of those already exist.
      | **Retains, from root chains** | the leak-candidate "Root Chain" has 9 non-empty chains of 13,884; the code calls it "cosmetic enrichment only", capped to the top few (`RootChainTopN`); the reference-chain analyzer samples 10 types | **Not usable.** Capped samples, and D5 forbids relations faked from chain text |
      | **Retains / dominates, from the dominator tree** | `IDominatorTreeProvider` is exact and already feeds the dominance-chain tree and exact retained bytes | **Unmeasured.** Could give "type A keeps type B alive" at type level; volume and shape unknown |
 
-   - **4a. Subscribes-to** *(pending, measure first)*
-     - **Fact:** a two-subject fact (publisher type, subscriber type) with `subscription.count`, from the existing per-group map. Exactness matters: the map is the uncapped source, so no top-N is introduced.
-     - **Open:** how many facts it adds against the 97,719 observations; a type that subscribes to many publishers; whether the event field belongs on the fact (the group is publisher type plus event field).
-     - **Panel:** "subscribes to" on the subscriber's page and "subscribed to by" on the publisher's, labelled with the fact kind like other fact-sourced relations.
+   - **4a. Subscribes-to** *(done 2026-10-12, verified on reference dump)*
+     - **Fact:** `event.subscription`, two subjects (publisher type, then subscriber type) and `subscription.count`, one per leak group and subscriber type, from the group's own tally. `TopSubscriberTypes` on the group snapshot is the complete tally despite its name, so no cap is introduced. The event field is the evidence locator. Registry 1.98.0, changelog entry, conformance list; Retention panel; `subscription.count` is summable.
+     - **Direction:** pairs are stored lower id first, so a directed fact records the order in its source name (`fact: event.subscription`, or `... (reversed)` when the first subject had the higher id). The client turns that into "subscribes to this" on the publisher's page and "this subscribes to it" on the subscriber's; a pair related both ways shows both. Directed fact kinds are a short list in `EntityRelationBuilder` and the client.
+     - **Tests:** an emission test (publisher first, one per group and subscriber type, none for an empty group, counts kept), 2 directed-naming tests, 1 panel mapping, conformance; harness 31 of 31 (2 new); full suite 1,777 passed, 66 skipped.
+     - **Real dump:** 1,980 facts (+2%: 97,719 to 99,699) covering all 1,027 groups, 440 distinct (publisher, subscriber) pairs, 135 subscriber types, 83 publishers; **the sum of `subscription.count` (25,863) equals the sum of the groups' subscriber counts exactly**, which shows nothing was dropped; no new entities; 433 relation pairs added (the 7 self-subscriptions relate nothing), none lost or re-sourced; claims identical; report.json +11 KB; 0 warnings. Results: `m2-step1/verify-m2b4a-results.txt`.
    - **4b. Dominator-tree relations** *(pending, investigate only if wanted)*
    - **Not pursued:** held-by-static (blocked), GC root to target (not a relation), chain-based retains (capped samples).
 

@@ -102,7 +102,7 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
     /// <c>TotalEventLeakInstances</c>/<c>InstanceEventLeakCount</c>/<c>StaticEventLeakCount</c> are
     /// exhaustive scalars always computed by <see cref="Analyze"/>, including the zero-leak case.
     /// </summary>
-    private static async ValueTask EmitObservationsAsync(AnalysisContext context, EventLeakDomainResult result, CancellationToken cancellationToken)
+    internal static async ValueTask EmitObservationsAsync(AnalysisContext context, EventLeakDomainResult result, CancellationToken cancellationToken)
     {
         var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes };
 
@@ -175,6 +175,51 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                     Description = group.EventFieldName,
                 }],
             }, cancellationToken);
+        }
+
+        // One fact per (publisher type, event, subscriber type): the first subject is the publisher, the second the subscriber. Read from the
+        // group's own subscriber-type tally, which covers every instance (TopSubscriberTypes holds all of them, sorted, despite its name).
+        foreach (EventLeakGroupSnapshot group in result.TopLeakGroups ?? [])
+        {
+            if (group.TopSubscriberTypes is null)
+                continue;
+
+            (string publisherName, MatchFidelity publisherFidelity) = EntityCanonicalizer.CanonicalizeTypeName(group.PublisherType);
+            foreach (NameCountEntry subscriber in group.TopSubscriberTypes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                (string subscriberName, MatchFidelity subscriberFidelity) = EntityCanonicalizer.CanonicalizeTypeName(subscriber.Name);
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "event.subscription",
+                    Subjects =
+                    [
+                        new TypeRef { CanonicalName = publisherName, Fidelity = publisherFidelity },
+                        new TypeRef { CanonicalName = subscriberName, Fidelity = subscriberFidelity },
+                    ],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["subscription.count"] = new Measure(subscriber.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Event Leak Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                    Evidence = [new EvidenceRef
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        Locator = $"{publisherName}.{group.EventFieldName}",
+                        Description = group.EventFieldName,
+                    }],
+                }, cancellationToken);
+            }
         }
 
         var populationMeasures = new Dictionary<string, Measure>

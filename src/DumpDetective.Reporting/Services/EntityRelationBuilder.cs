@@ -17,6 +17,12 @@ internal static class EntityRelationBuilder
 {
     public const string FactSourcePrefix = "fact: ";
 
+    // A fact whose two subjects have different roles (a publisher and its subscriber) keeps them: pairs are stored lower id first, so the
+    // source name says when the first subject was the higher id. The client reads both back to say which side the open page is on.
+    public const string ReversedSuffix = " (reversed)";
+
+    private static readonly HashSet<string> DirectedFactKinds = new(StringComparer.Ordinal) { "event.subscription" };
+
     public static EntityRelations? FromTables(IReadOnlyList<ReportDomainSection>? domains)
     {
         if (domains is null)
@@ -57,6 +63,13 @@ internal static class EntityRelationBuilder
             {
                 if (entityIdByKey.TryGetValue((subject.Kind, subject.JoinKey), out int id) && !idsInFact.Contains(id))
                     idsInFact.Add(id);
+            }
+
+            if (DirectedFactKinds.Contains(observations[i].ObservationType) && idsInFact.Count == 2)
+            {
+                string source = FactSourcePrefix + observations[i].ObservationType + (idsInFact[0] > idsInFact[1] ? ReversedSuffix : "");
+                pairs.Add(idsInFact[0], idsInFact[1], source);
+                continue;
             }
 
             AddAllPairs(idsInFact, FactSourcePrefix + observations[i].ObservationType, pairs);

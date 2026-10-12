@@ -204,6 +204,29 @@ public sealed class EntityRelationBuilderTests
             .Should().Equal((0, 2, "Memory Analysis / Top types"), (1, 4, "fact: a.fact"));
     }
 
+    [Fact]
+    public void FromFacts_DirectedFact_NamesTheSourceReversedOnlyWhenTheFirstSubjectHasTheHigherId()
+    {
+        Observation forward = Fact("event.subscription", Entity(0), Entity(1));
+        Observation reversed = Fact("event.subscription", Entity(3), Entity(2));
+
+        EntityRelations relations = EntityRelationBuilder.FromFacts([forward, reversed], Entities)!;
+
+        relations.Pairs.Select(p => (p.First, p.Second, string.Join(",", p.SourceIndexes.Select(i => relations.Sources[i]))))
+            .Should().Equal((0, 1, "fact: event.subscription"), (2, 3, "fact: event.subscription (reversed)"));
+    }
+
+    [Fact]
+    public void FromFacts_SameTypePairInBothDirectionsOnDifferentEvents_KeepsBothSources()
+    {
+        Observation ab = Fact("event.subscription", Entity(0), Entity(1));
+        Observation ba = Fact("event.subscription", Entity(1), Entity(0));
+
+        EntityRelation pair = EntityRelationBuilder.FromFacts([ab, ba], Entities)!.Pairs.Should().ContainSingle().Which;
+
+        pair.SourceIndexes.Should().HaveCount(2);
+    }
+
     private static EntityRef Entity(int id) => Entities[id].Kind switch
     {
         EntityKind.Type => new TypeRef { CanonicalName = Entities[id].JoinKey, Fidelity = MatchFidelity.Exact },

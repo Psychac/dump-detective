@@ -48,6 +48,7 @@ internal static class EntityFactPanels
         ["heap.root"] = Retention,
         ["event.publisher-leak"] = Retention,
         ["event.publisher-leak-group"] = Retention,
+        ["event.subscription"] = Retention,
         ["thread.retained-bytes"] = Retention,
 
         ["finalizer.queue-entry"] = Lifecycle,
@@ -96,7 +97,7 @@ internal static class EntityFactPanels
     private static readonly HashSet<string> SummableMeasures = new(StringComparer.Ordinal)
     {
         "instance.count", "shallow.bytes", "gen0.count", "gen1.count", "gen2.count", "gen2.bytes", "loh.count", "loh.bytes",
-        "total.bytes", "total.count", "object.count", "count", "subscriber.count", "pinned.count", "pinned.bytes",
+        "total.bytes", "total.count", "object.count", "count", "subscriber.count", "subscription.count", "pinned.count", "pinned.bytes",
         "captured.bytes", "module.count", "thread.count", "wasted.bytes", "wasted-padding.bytes", "waste.count", "waste.bytes",
     };
 

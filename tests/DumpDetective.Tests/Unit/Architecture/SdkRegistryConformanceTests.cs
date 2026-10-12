@@ -235,6 +235,7 @@ public sealed class SdkRegistryConformanceTests
             ["runtime.module-disk-footprint"] = ["disk.bytes"],
             ["runtime.appdomain-footprint"] = ["module.count", "shallow.bytes"],
             ["thread.appdomain-population"] = ["thread.count"],
+            ["event.subscription"] = ["subscription.count"],
             ["runtime.module-appdomain-membership"] = [],
             ["thread.appdomain-membership"] = [],
             ["thread.stack-cluster-member"] = ["cluster.rank"],

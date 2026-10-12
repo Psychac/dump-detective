@@ -356,3 +356,22 @@ test('an AppDomain page lists its modules and threads from membership facts, and
   assert.equal(modulePage.groups[0].children[0].textContent, 'AppDomains (1) \u00b7 in fact runtime.module-appdomain-membership');
   assert.equal(groupItems(modulePage.groups[0])[0].children[0].href, '#entity/appdomain/' + encodeURIComponent('DefaultDomain'));
 });
+
+test('subscription relations say which side the page is on, from the pair order and the reversed marker', function () {
+  const sources = ['fact: event.subscription', 'fact: event.subscription (reversed)'];
+  // Entity 0 is the page. Forward: first subject has the lower id. Reversed: first subject has the higher id.
+  const others = [{ kind: 'Type', joinKey: 'App.ViewA' }, { kind: 'Type', joinKey: 'App.ViewB' }];
+  // Page is entity 0 = the publisher in both, so its pairs are (0,1) forward and (0,2) forward: the others subscribe to it.
+  const asPublisher = openRelationsPage({ kind: 'Type', joinKey: 'App.Publisher' }, others, [[0, 1, [0]], [0, 2, [0]]], sources);
+  assert.equal(asPublisher.groups[0].children[0].textContent, 'Types (2) \u00b7 subscribes to this');
+
+  // Page is entity 0 = a subscriber; the publisher has the higher id, so the stored source is "(reversed)" (first subject, the publisher, is higher).
+  const asSubscriber = openRelationsPage({ kind: 'Type', joinKey: 'App.ViewA' }, [{ kind: 'Type', joinKey: 'App.Publisher' }], [[0, 1, [1]]], sources);
+  assert.equal(asSubscriber.groups[0].children[0].textContent, 'Types (1) \u00b7 this subscribes to it');
+});
+
+test('a type that is both publisher and subscriber of another shows both roles on one line', function () {
+  const sources = ['fact: event.subscription', 'fact: event.subscription (reversed)'];
+  const page = openRelationsPage({ kind: 'Type', joinKey: 'App.A' }, [{ kind: 'Type', joinKey: 'App.B' }], [[0, 1, [0, 1]]], sources);
+  assert.equal(page.groups[0].children[0].textContent, 'Types (1) · subscribes to this, this subscribes to it');
+});

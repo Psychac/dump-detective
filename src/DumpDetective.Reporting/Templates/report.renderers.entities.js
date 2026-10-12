@@ -418,24 +418,28 @@ function entityRelations(entity) {
   }
   const kinds = ENTITY_RELATION_KIND_ORDER.filter(function (kind) { return byKind.has(kind); })
     .concat(Array.from(byKind.keys()).filter(function (kind) { return !ENTITY_RELATION_KIND_ORDER.includes(kind); }));
-  for (const kind of kinds) section.appendChild(entityRelationGroup(kind, byKind.get(kind)));
+  for (const kind of kinds) section.appendChild(entityRelationGroup(kind, byKind.get(kind), entity.id));
   return section;
 }
 
-function entityRelationGroup(kind, items) {
+function entityRelationGroup(kind, items, selfId) {
   items.sort(function (a, b) {
     const nameA = entityRelationName(a.entity), nameB = entityRelationName(b.entity);
     return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
   });
   const sources = (_entityRelations && _entityRelations.sources) || [];
-  const sourceNames = function (item) { return item.sources.map(function (index) { return entityRelationSourceLabel(sources[index] || String(index)); }).join(', '); };
+  const sourceNames = function (item) {
+    const labels = item.sources.map(function (index) { return entityRelationSourceLabel(sources[index] || String(index), selfId, item.entity.id); });
+    // "in A, B" rather than "in A, in B": only the first of a run of "in ..." labels keeps its word.
+    return labels.map(function (label, i) { return i > 0 && label.startsWith('in ') && labels[i - 1].startsWith('in ') ? label.slice(3) : label; }).join(', ');
+  };
   const sharedSource = sourceNames(items[0]);
   const allShare = items.every(function (item) { return sourceNames(item) === sharedSource; });
 
   const group = el('details', 'entity-relations__group');
   const summary = el('summary', 'entity-relations__summary');
   summary.textContent = (ENTITY_RELATION_KIND_LABEL[kind] || kind) + ' (' + items.length.toLocaleString('en-US') + ')'
-    + (allShare ? ' \u00b7 in ' + sharedSource : '');
+    + (allShare ? ' \u00b7 ' + sharedSource : '');
   group.appendChild(summary);
   const list = el('ul', 'entity-relations__list');
   group.appendChild(list);
@@ -455,9 +459,21 @@ function entityRelationGroup(kind, items) {
   return group;
 }
 
+// Facts whose two subjects have different roles. The first subject is the one on the page when asFirst is used; the tool writes " (reversed)"
+// after the fact kind when the first subject had the higher entity id, because pairs are stored lower id first.
+const ENTITY_DIRECTED_FACTS = {
+  'event.subscription': { asFirst: 'subscribes to this', asSecond: 'this subscribes to it' },
+};
+
 // A source is a table ("Analyzer / Table title") or a fact kind, written with a "fact: " prefix by the tool.
-function entityRelationSourceLabel(source) {
-  return source.startsWith('fact: ') ? 'fact ' + source.slice(6) : source;
+function entityRelationSourceLabel(source, selfId, otherId) {
+  if (!source.startsWith('fact: ')) return 'in ' + source;
+  const reversed = source.endsWith(' (reversed)');
+  const kind = source.slice(6, reversed ? source.length - ' (reversed)'.length : source.length);
+  const roles = ENTITY_DIRECTED_FACTS[kind];
+  if (!roles) return 'in fact ' + kind;
+  const selfIsFirst = reversed ? selfId > otherId : selfId < otherId;
+  return selfIsFirst ? roles.asFirst : roles.asSecond;
 }
 
 function entityRelationItem(item, sourceText) {
@@ -468,7 +484,7 @@ function entityRelationItem(item, sourceText) {
   row.appendChild(link);
   if (sourceText) {
     const source = el('span', 'entity-relations__source');
-    source.textContent = ' \u00b7 in ' + sourceText;
+    source.textContent = ' \u00b7 ' + sourceText;
     row.appendChild(source);
   }
   return row;

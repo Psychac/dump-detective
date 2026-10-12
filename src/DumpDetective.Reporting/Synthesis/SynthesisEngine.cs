@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -22,12 +23,50 @@ namespace DumpDetective.Reporting.Synthesis;
 internal sealed class SynthesisEngine
 {
     private readonly IReadOnlyList<ISynthesisRule> _rules;
+    private readonly IReadOnlyList<ICoverageRule> _coverageRules;
     private readonly ILogger<SynthesisEngine> _logger;
 
-    public SynthesisEngine(IReadOnlyList<ISynthesisRule> rules, ILogger<SynthesisEngine>? logger = null)
+    public SynthesisEngine(
+        IReadOnlyList<ISynthesisRule> rules, ILogger<SynthesisEngine>? logger = null, IReadOnlyList<ICoverageRule>? coverageRules = null)
     {
         _rules = rules;
+        _coverageRules = coverageRules ?? [];
         _logger = logger ?? NullLogger<SynthesisEngine>.Instance;
+    }
+
+    public IReadOnlyList<CoverageRecord> EvaluateCoverage(IReadOnlyList<Observation> observations, SynthesisContext context)
+    {
+        if (_coverageRules.Count == 0)
+            return [];
+
+        Dictionary<string, List<Observation>> byType = new(StringComparer.Ordinal);
+        foreach (Observation observation in observations)
+        {
+            if (!byType.TryGetValue(observation.ObservationType, out List<Observation>? bucket))
+            {
+                bucket = [];
+                byType[observation.ObservationType] = bucket;
+            }
+
+            bucket.Add(observation);
+        }
+
+        var records = new List<CoverageRecord>();
+        foreach (ICoverageRule rule in _coverageRules)
+        {
+            try
+            {
+                var ruleRef = new RuleRef(rule.RuleId, rule.Version);
+                foreach (CoverageRecord record in rule.Evaluate(new ObservationMatchSet(CollectMatches(rule.Query, byType)), context))
+                    records.Add(record with { Rule = ruleRef });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Coverage rule '{RuleId}' threw and was skipped", rule.RuleId);
+            }
+        }
+
+        return records;
     }
 
     public async ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(

@@ -4,7 +4,7 @@ Follows [m2b-relations-plan.md](m2b-relations-plan.md). Tracked as milestone **M
 [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path); the model is
 [§ 7](ReportSystemVision.md#7-coverage-and-negative-space). Depends only on M1 (claims), so it does not wait on M4 or M5.
 
-**Status:** planned 2026-10-12, nothing built. Steps 1-2 done; D1-D6 decided 2026-10-12, with D6 points 3-4 open until step 8's reading of the trend comparers.
+**Status:** planned 2026-10-12, nothing built. Steps 1-2 done, step 4 started (ReferenceChain); D1-D6 decided 2026-10-12, with D6 points 3-4 open until step 8's reading of the trend comparers.
 
 ## Goal
 
@@ -53,6 +53,13 @@ A reader can tell "we looked and found nothing" from "we did not look". Three vi
    - **Link:** a claim carries references (indices into the document's `coverage` array) to the records that bear on it; the first check is the ReferenceChain traversal-limit case on the reference dump, one claim linking to one `Partial` record.
    - **Rule (decided 2026-10-12, option B):** a record attaches to a claim only when a capability was unavailable and the claim's analyzer used it, never for an optional capability that no artifact in the session was meant to supply. Today nothing in the data tells "no trace supplied" from "trace supplied but lacking this capability" (a trace artifact claims every `trace.*` capability), so the rule needs revisiting when a source can provide only some capabilities.
    - **Confidence:** only `Degraded` / `Partial` records add a `limitingFactors` line; absent trace capabilities never touch confidence. The engine already folds observation fidelity (`Degraded`) into `CapabilityFidelity`, so a new cap must not double-count it.
+   - **Progress, 2026-10-12: ReferenceChain done, 4 rules left** *(D-B decided: a separate `ICoverageRule`, not a new return type on `ISynthesisRule`)*.
+     - **Built:** `ICoverageRule` and `CoverageBoundary` in the SDK (`SdkVersion.Minor` 19); `CoverageRecord` gains `Boundary`, `Rule` and `Claims`; `CoverageImpactKind.Limited`; `SynthesisEngine.EvaluateCoverage`; `CoverageMerger` (a rule record replaces the session record for the same capability and artifact); factory and catalog gain `CoverageRuleTypes` (default empty, so existing rules and fakes are untouched); `ReferenceChainCoverageRule` replaces the two `Missing` claims (rule bumped to version 2, golden re-blessed).
+     - **Link is record-side:** the record lists the fingerprints of the claims whose analyzer is limited (`Claims`), instead of the claim carrying references, so `Claim` and `FindingRecord` did not change; a claim's coverage is the inverse lookup. The linked claim's `LimitingFactors` gains one line naming the boundary; its scores do not move.
+     - **Tests:** 4 on `ReferenceChainCoverageRule`, 1 enricher link test, 3 `CoverageMergerTests`; the traversal-limit claim test now asserts the claim is gone. Suite 1793 passed, 66 skipped.
+     - **Real dump (82 s, foreground):** `heap.root-paths` is now `Partial`, 2 of 10 sampled types before the path or depth budget, linked to `reference chain analysis::retention-coverage`, whose limiting factors gained that line. Claims 82 → 81 (only `reference chain analysis::traversal-limit` gone); no other claim changed severity, title or confidence; entities, summary, relations and `topActions` identical; 32 records as before (the `Partial` replaced the `Complete`). Results: `m2-step1/after-m3s4/`.
+     - **Left in step 4:** GCRoot subgraph-walk-capped, Dominator approximated reference counts, String dedup sampling (all three do not fire on this dump, so they get unit tests only), AnalyzerFailures (needs run status, not observations). The capability key for each is not yet chosen.
+     - **Known gap:** in a trend run, rule-produced records of the earlier dumps are not kept (only the session records and the last state reach the document); step 8 owns that.
 5. **Report surface.** A coverage headline on the summary and a per-claim coverage line; the appendix status table links to claims it affects. HTML-only first, like the dossier.
 6. **Unknown as a value** (D3), starting with the tables measured in step 1 as worst.
 7. **Negative claims** (D4), a few rules, each with its own falsifier like any claim.

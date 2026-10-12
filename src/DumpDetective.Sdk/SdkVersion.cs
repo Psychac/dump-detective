@@ -19,7 +19,10 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>18 as of 2026-10-12 (added <see cref="Artifacts.CoverageRecord"/>, <see cref="Artifacts.CoverageStatus"/>,
+    /// <summary>19 as of 2026-10-12 (added <see cref="Synthesis.ICoverageRule"/>, <see cref="Artifacts.CoverageBoundary"/>,
+    /// <see cref="Artifacts.CoverageImpactKind.Limited"/> and <see cref="Artifacts.CoverageRecord"/>'s <c>Boundary</c> / <c>Rule</c> / <c>Claims</c> —
+    /// M3 step 4 of docs/ReportStructure/m3-coverage-plan.md).
+    /// Before that, 18 as of 2026-10-12 (added <see cref="Artifacts.CoverageRecord"/>, <see cref="Artifacts.CoverageStatus"/>,
     /// <see cref="Artifacts.CoverageImpact"/> and <see cref="Artifacts.CoverageImpactKind"/> — a session's per-capability
     /// coverage, M3 step 2 of docs/ReportStructure/m3-coverage-plan.md; no <c>capability-registry.json</c> bump, no new capability).
     /// Before that, 17 as of 2026-09-13 (added <see cref="Analysis.RuntimeThreadRef.ExceptionAddress"/> —
@@ -118,7 +121,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 18;
+    public const int Minor = 19;
 
     public static string AsString => $"{Major}.{Minor}";
 }

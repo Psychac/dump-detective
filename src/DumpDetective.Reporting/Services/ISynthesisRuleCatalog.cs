@@ -7,6 +7,8 @@ namespace DumpDetective.Reporting.Services;
 internal interface ISynthesisRuleCatalog
 {
     IReadOnlyList<Type> RuleTypes { get; }
+
+    IReadOnlyList<Type> CoverageRuleTypes => [];
 }
 
 /// <summary>
@@ -26,6 +28,8 @@ internal interface ISynthesisRuleCatalog
 /// </remarks>
 internal sealed class DefaultSynthesisRuleCatalog : ISynthesisRuleCatalog
 {
+    public IReadOnlyList<Type> CoverageRuleTypes { get; } = [typeof(ReferenceChainCoverageRule)];
+
     public IReadOnlyList<Type> RuleTypes { get; } =
         [typeof(ArraySynthesisRule), typeof(LohFragmentationSynthesisRule), typeof(AsyncStateMachineSynthesisRule), typeof(AsyncTaskSynthesisRule), typeof(FinalizableObjectSynthesisRule), typeof(GCHandleSynthesisRule), typeof(GCRootSynthesisRule), typeof(WeakReferenceSynthesisRule), typeof(SqlConnectionPoolSynthesisRule), typeof(SqlCommandSynthesisRule), typeof(SqlTransactionSynthesisRule), typeof(DbConnectionSynthesisRule), typeof(HttpObjectSynthesisRule), typeof(TimerLeakSynthesisRule), typeof(WcfChannelSynthesisRule), typeof(DominatorSynthesisRule), typeof(EventLeakSynthesisRule), typeof(ReferenceChainSynthesisRule), typeof(StaticRootSynthesisRule), typeof(AllocationPatternSynthesisRule), typeof(GCGenerationSynthesisRule), typeof(MemorySynthesisRule), typeof(SegmentReservationSynthesisRule), typeof(CrashSynthesisRule), typeof(HeapTopologySynthesisRule), typeof(JitSynthesisRule), typeof(ModuleSynthesisRule), typeof(HangSynthesisRule), typeof(LockGraphSynthesisRule), typeof(ThreadSynthesisRule), typeof(ThreadStackClusterSynthesisRule), typeof(BoxingSynthesisRule), typeof(CollectionSynthesisRule), typeof(ObjectShapeSynthesisRule), typeof(StringSynthesisRule), typeof(LeakCandidateSynthesisRule),
         typeof(LohPressureInsightRule), typeof(LohFragmentationInsightRule), typeof(PohGrowthInsightRule), typeof(ThreadContentionInsightRule), typeof(FinalizerQueueBacklogInsightRule), typeof(PinnedHandlePressureInsightRule), typeof(ActiveCrashInsightRule), typeof(LeakSuspicionInsightRule), typeof(WastefulCollectionsInsightRule), typeof(OrphanedTaskAccumulationInsightRule),

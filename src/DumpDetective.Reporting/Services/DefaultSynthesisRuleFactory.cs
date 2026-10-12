@@ -31,4 +31,14 @@ internal sealed class DefaultSynthesisRuleFactory : ISynthesisRuleFactory
 
         return rules;
     }
+
+    public IReadOnlyList<ICoverageRule> CreateCoverageRules()
+    {
+        var rules = new List<ICoverageRule>(_catalog.CoverageRuleTypes.Count);
+
+        foreach (Type ruleType in _catalog.CoverageRuleTypes)
+            rules.Add((ICoverageRule)ActivatorUtilities.CreateInstance(_serviceProvider, ruleType));
+
+        return rules;
+    }
 }

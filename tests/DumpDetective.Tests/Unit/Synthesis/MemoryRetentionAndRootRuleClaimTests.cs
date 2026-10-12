@@ -178,13 +178,42 @@ public sealed class MemoryRetentionAndRootRuleClaimTests
     }
 
     [Fact]
-    public async Task ReferenceChain_TraversalLimitIsAMissingClaim()
+    public async Task ReferenceChain_TraversalLimitIsNoLongerAClaim_ItIsCoverage()
     {
         IReadOnlyList<Claim> claims = await RunAsync(new ReferenceChainSynthesisRule(), [ChainPopulation(10, 8, 80, 3)]);
 
-        Claim limit = claims.Single(c => c.Fingerprint.EndsWith("traversal-limit"));
-        limit.Assertion!.Predicate.Should().Be(AssertionPredicate.Missing);
-        limit.Assertion.Measure!.Value.Value.Should().BeApproximately(30, 0.001);
+        claims.Should().NotContain(c => c.Fingerprint.EndsWith("traversal-limit"));
+    }
+
+    [Fact]
+    public void ReferenceChainCoverage_TraversalLimit_IsPartialWithTheBoundary()
+    {
+        IReadOnlyList<CoverageRecord> records = new ReferenceChainCoverageRule()
+            .Evaluate(new ObservationMatchSet([ChainPopulation(10, 8, 80, 3)]), new SynthesisContext());
+
+        CoverageRecord record = records.Should().ContainSingle().Subject;
+        record.Capability.Key.Should().Be(CapabilityVocabulary.HeapRootPaths);
+        record.Status.Should().Be(CoverageStatus.Partial);
+        record.Boundary.Should().Be(new CoverageBoundary(7, 10, "sampled types", "path or depth budget"));
+        record.Impacts.Should().ContainSingle().Which.Should().Be(new CoverageImpact("Reference Chain Analysis", CoverageImpactKind.Limited));
+    }
+
+    [Fact]
+    public void ReferenceChainCoverage_NoSamples_IsPartialWithAZeroBoundary()
+    {
+        IReadOnlyList<CoverageRecord> records = new ReferenceChainCoverageRule()
+            .Evaluate(new ObservationMatchSet([ChainPopulation(0, 0, 0, 0)]), new SynthesisContext());
+
+        records.Should().ContainSingle().Which.Boundary.Should().Be(
+            new CoverageBoundary(0, 0, "sampled types", "no valid sample instance for the configured top types"));
+    }
+
+    [Fact]
+    public void ReferenceChainCoverage_NoLimitHit_ProducesNoRecord()
+    {
+        new ReferenceChainCoverageRule()
+            .Evaluate(new ObservationMatchSet([ChainPopulation(10, 2, 20, 0)]), new SynthesisContext())
+            .Should().BeEmpty();
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

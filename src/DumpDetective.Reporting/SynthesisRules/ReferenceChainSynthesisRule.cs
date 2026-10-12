@@ -19,14 +19,13 @@ namespace DumpDetective.Reporting.SynthesisRules;
 internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
 {
     private const double RetentionCoverageWarningPercent = 70;
-    private const double TraversalLimitedWarningPercent = 20;
     private const int FinalizerOnlyPopulationWarningThreshold = 100;
     private const int SharedRootTypeCountWarningThreshold = 3;
 
     private const string AnalyzerName = "Reference Chain Analysis";
 
     public string RuleId => "reference-chain.finding-parity";
-    public int Version => 1;
+    public int Version => 2;
 
     public ObservationQuery Query { get; } = new()
     {
@@ -61,40 +60,9 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
 
         long analyzedSamples = (long)population.Measures["analyzed.count"].Value;
 
+        // No valid sample and traversal limits are coverage, not claims about the dump: see ReferenceChainCoverageRule.
         if (analyzedSamples == 0)
-        {
-            return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
-            {
-                Fingerprint = Fingerprint("no-samples"),
-                Assertion = new Assertion
-                {
-                    Predicate = AssertionPredicate.Missing,
-                    Measure = ClaimParts.Count(0),
-                    Qualifiers = new AssertionQualifiers { Location = "sampled top types", Scope = "valid sample instances" },
-                },
-                Support = [new EvidenceStatement([population.Id], "No valid sample instance could be obtained for the configured top types.")],
-                Counter = Counter.None("With no samples analysed, nothing observed bears for or against retention."),
-                FalsifiedBy =
-                [
-                    new FalsificationTest
-                    {
-                        Kind = FalsificationKind.CodeInspection,
-                        Test = "Re-run with broader type coverage; if samples are found, the gap was the configured type list, not the dump.",
-                    },
-                ],
-                Analyzer = AnalyzerName,
-                Category = "Retention",
-                Severity = Severity.Info,
-                Title = "No sample instances available for reference-chain tracing",
-                Narrative = "Reference-chain analyzer could not obtain valid sample objects for configured top types.",
-                Recommendation = "Review type statistics and dump integrity; re-run with broader type coverage if needed.",
-                Tags = ["reference-chain", "roots", "retention"],
-                MetricValue = 0,
-                MetricUnit = "% retained-samples",
-                DerivedFrom = [population.Id],
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
-            }]);
-        }
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long retainedSamples = (long)population.Measures["retained.count"].Value;
         double retainedPercent = population.Measures["retained.percent"].Value;
@@ -137,43 +105,6 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
             DerivedFrom = [population.Id],
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         });
-
-        if (traversalLimitedSamples > 0)
-        {
-            double limitedPct = analyzedSamples == 0 ? 0 : traversalLimitedSamples * 100.0 / analyzedSamples;
-            findings.Add(new Claim
-            {
-                Fingerprint = Fingerprint("traversal-limit"),
-                Assertion = new Assertion
-                {
-                    Predicate = AssertionPredicate.Missing,
-                    Measure = ClaimParts.Percent(limitedPct),
-                    Reference = ClaimParts.Budget(ClaimParts.Percent(TraversalLimitedWarningPercent), "warning threshold"),
-                    Qualifiers = new AssertionQualifiers { Location = "sampled types", Scope = "root-path searches that hit the path or depth budget" },
-                },
-                Support = [new EvidenceStatement([population.Id], $"{traversalLimitedSamples:N0} of {analyzedSamples:N0} sampled types hit traversal limits before a conclusive root-path result.")],
-                Counter = Counter.None("The limit is a path and depth budget set by the analysis; a larger budget could settle these samples either way."),
-                FalsifiedBy =
-                [
-                    new FalsificationTest
-                    {
-                        Kind = FalsificationKind.CodeInspection,
-                        Test = "Re-run with a higher depth and path budget; if the limited samples resolve to the same answer, the limit did not matter.",
-                    },
-                ],
-                Analyzer = AnalyzerName,
-                Category = "Retention",
-                Severity = limitedPct >= TraversalLimitedWarningPercent ? Severity.Warning : Severity.Info,
-                Title = "Reference-chain traversal limit reached",
-                Narrative = $"{traversalLimitedSamples:N0}/{analyzedSamples:N0} sampled type(s) hit traversal limits before a conclusive root-path result ({limitedPct:F1}%).",
-                Recommendation = "Increase sampling depth/path budget for inconclusive types and validate with targeted object tracing.",
-                Tags = ["reference-chain", "traversal-limit", "retention"],
-                MetricValue = limitedPct,
-                MetricUnit = "% traversal-limited-samples",
-                DerivedFrom = [population.Id],
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
-            });
-        }
 
         Claim? finalizerFinding = BuildFinalizerOnlyFinding(typeSamples);
         if (finalizerFinding is not null) findings.Add(finalizerFinding);

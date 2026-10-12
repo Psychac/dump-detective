@@ -1,6 +1,7 @@
 using DumpDetective.Reporting.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Synthesis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -27,7 +28,7 @@ internal sealed class SynthesisFindingEnricher
 
     public SynthesisFindingEnricher(ISynthesisRuleFactory ruleFactory)
     {
-        _engine = new SynthesisEngine(ruleFactory.CreateRules());
+        _engine = new SynthesisEngine(ruleFactory.CreateRules(), coverageRules: ruleFactory.CreateCoverageRules());
     }
 
     private static Dictionary<ObservationId, string> IndexAnalyzers(IReadOnlyList<Observation> observations)
@@ -80,7 +81,7 @@ internal sealed class SynthesisFindingEnricher
         // ignoring its match set) fire on a zero-observation pass too, which broke that test's own
         // "nothing to synthesize, return runs unchanged" contract for every rule, not just this one.
         if (observations.Count == 0)
-            return new SynthesisEnrichment(runs, [], EmptyEvidenceSources);
+            return new SynthesisEnrichment(runs, [], EmptyEvidenceSources, []);
 
         int failedCount = 0;
         for (int i = 0; i < runs.Count; i++)
@@ -91,8 +92,12 @@ internal sealed class SynthesisFindingEnricher
         var context = new SynthesisContext { AnalyzerRunSummary = (runs.Count, failedCount) };
 
         IReadOnlyList<Claim> findings = await _engine.SynthesizeAsync(observations, context, cancellationToken);
+        IReadOnlyList<CoverageRecord> coverage = _engine.EvaluateCoverage(observations, context);
+        if (coverage.Count > 0)
+            (findings, coverage) = LinkClaimsToCoverage(findings, coverage);
+
         if (findings.Count == 0)
-            return new SynthesisEnrichment(runs, [], EmptyEvidenceSources);
+            return new SynthesisEnrichment(runs, [], EmptyEvidenceSources, coverage);
 
         var evidenceSourcesByFingerprint = new Dictionary<string, EvidenceSources>(StringComparer.Ordinal);
         Dictionary<ObservationId, string>? analyzerByObservation = null;
@@ -129,11 +134,57 @@ internal sealed class SynthesisFindingEnricher
         foreach (List<Claim> bucket in byAnalyzer.Values)
             unattached.AddRange(bucket);
 
-        return new SynthesisEnrichment(updated, unattached, evidenceSourcesByFingerprint);
+        return new SynthesisEnrichment(updated, unattached, evidenceSourcesByFingerprint, coverage);
     }
+
+    // A claim is linked to a limited analyzer's record by analyzer name; the claim's confidence gains a limiting factor
+    // naming the boundary but its scores do not move, because the rule already judged how well its evidence supports the claim.
+    private static (IReadOnlyList<Claim> Claims, IReadOnlyList<CoverageRecord> Coverage) LinkClaimsToCoverage(
+        IReadOnlyList<Claim> claims, IReadOnlyList<CoverageRecord> coverage)
+    {
+        var fingerprintsByRecord = new List<string>[coverage.Count];
+        var linkedClaims = new List<Claim>(claims.Count);
+
+        foreach (Claim claim in claims)
+        {
+            Claim linked = claim;
+            for (int i = 0; i < coverage.Count; i++)
+            {
+                if (!IsLimiting(coverage[i], claim.Analyzer))
+                    continue;
+
+                (fingerprintsByRecord[i] ??= []).Add(claim.Fingerprint);
+                linked = linked with { Confidence = linked.Confidence with { LimitingFactors = [.. linked.Confidence.LimitingFactors, LimitingFactorText(coverage[i])] } };
+            }
+
+            linkedClaims.Add(linked);
+        }
+
+        var linkedCoverage = new List<CoverageRecord>(coverage.Count);
+        for (int i = 0; i < coverage.Count; i++)
+            linkedCoverage.Add(fingerprintsByRecord[i] is { } fingerprints ? coverage[i] with { Claims = fingerprints } : coverage[i]);
+
+        return (linkedClaims, linkedCoverage);
+    }
+
+    private static bool IsLimiting(CoverageRecord record, string analyzer)
+    {
+        foreach (CoverageImpact impact in record.Impacts)
+        {
+            if (impact.Kind == CoverageImpactKind.Limited && string.Equals(impact.Analyzer, analyzer, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string LimitingFactorText(CoverageRecord record) => record.Boundary is { } boundary
+        ? $"{record.Capability} coverage is partial: {boundary.Reached:N0} of {boundary.Total:N0} {boundary.Unit} before the {boundary.Limit}."
+        : $"{record.Capability} coverage is partial.";
 }
 
 internal readonly record struct SynthesisEnrichment(
     IReadOnlyList<AnalyzerRunResult> Runs,
     IReadOnlyList<Claim> UnattachedFindings,
-    IReadOnlyDictionary<string, EvidenceSources> EvidenceSourcesByFingerprint);
+    IReadOnlyDictionary<string, EvidenceSources> EvidenceSourcesByFingerprint,
+    IReadOnlyList<CoverageRecord> Coverage);

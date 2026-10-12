@@ -65,6 +65,7 @@ internal sealed class RunAnalyzersNode(
             state.Runs = enrichment.Runs;
             state.Insights = enrichment.UnattachedFindings;
             state.EvidenceSourcesByFingerprint = enrichment.EvidenceSourcesByFingerprint;
+            state.Coverage = CoverageMerger.Merge(state.Coverage, enrichment.Coverage);
         }
 
         state.IncidentContext = IncidentContextFactory.Create(

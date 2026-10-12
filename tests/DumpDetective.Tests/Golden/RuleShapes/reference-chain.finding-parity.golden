@@ -1,44 +1,9 @@
 rule: reference-chain.finding-parity
-version: 1
+version: 2
 [
   {
     "name": "no-samples",
-    "claims": [
-      {
-        "fingerprint": "reference chain analysis::no-samples",
-        "severity": "Info",
-        "assertion": {
-          "predicate": "Missing",
-          "measure": {
-            "value": 0,
-            "unit": "Count",
-            "semantics": "Count"
-          },
-          "qualifiers": {
-            "location": "sampled top types",
-            "scope": "valid sample instances"
-          }
-        },
-        "support": [
-          {
-            "observations": [
-              "observations[0]"
-            ],
-            "why": "No valid sample instance could be obtained for the configured top types."
-          }
-        ],
-        "counter": {
-          "statements": [],
-          "noneFoundBecause": "With no samples analysed, nothing observed bears for or against retention."
-        },
-        "falsifiedBy": [
-          {
-            "kind": "CodeInspection",
-            "test": "Re-run with broader type coverage; if samples are found, the gap was the configured type list, not the dump."
-          }
-        ]
-      }
-    ]
+    "claims": []
   },
   {
     "name": "coverage-warning-with-limited",
@@ -88,48 +53,6 @@ version: 1
             "kind": "Windbg",
             "test": "On a sampled instance reported as rooted: if !gcroot finds no root, it is unreachable garbage awaiting collection, not retained.",
             "command": "!gcroot \u003Csample address\u003E"
-          }
-        ]
-      },
-      {
-        "fingerprint": "reference chain analysis::traversal-limit",
-        "severity": "Warning",
-        "assertion": {
-          "predicate": "Missing",
-          "measure": {
-            "value": 30,
-            "unit": "Percent",
-            "semantics": "Ratio"
-          },
-          "reference": {
-            "value": {
-              "value": 20,
-              "unit": "Percent",
-              "semantics": "Ratio"
-            },
-            "basis": "warning threshold"
-          },
-          "qualifiers": {
-            "location": "sampled types",
-            "scope": "root-path searches that hit the path or depth budget"
-          }
-        },
-        "support": [
-          {
-            "observations": [
-              "observations[0]"
-            ],
-            "why": "3 of 10 sampled types hit traversal limits before a conclusive root-path result."
-          }
-        ],
-        "counter": {
-          "statements": [],
-          "noneFoundBecause": "The limit is a path and depth budget set by the analysis; a larger budget could settle these samples either way."
-        },
-        "falsifiedBy": [
-          {
-            "kind": "CodeInspection",
-            "test": "Re-run with a higher depth and path budget; if the limited samples resolve to the same answer, the limit did not matter."
           }
         ]
       }

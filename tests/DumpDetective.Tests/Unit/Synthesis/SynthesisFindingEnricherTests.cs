@@ -101,11 +101,53 @@ public sealed class SynthesisFindingEnricherTests
         Confidence = 1.0,
     };
 
+    [Fact]
+    public async Task EnrichAsync_LinksClaimsOfALimitedAnalyzerToItsCoverageRecord_AndNamesTheBoundaryInTheirConfidence()
+    {
+        var enricher = new SynthesisFindingEnricher(new FakeRuleFactory(
+            [new StubRule("Stub Analyzer", "stub-fingerprint"), new StubRule("Other Analyzer", "other-fingerprint")],
+            [new LimitedStubCoverageRule("Stub Analyzer")]));
+
+        SynthesisEnrichment enrichment = await enricher.EnrichAsync([], [MakeObservation()], CancellationToken.None);
+
+        CoverageRecord record = enrichment.Coverage.Should().ContainSingle().Subject;
+        record.Claims.Should().Equal("stub-fingerprint");
+        record.Rule.Should().Be(new RuleRef("stub.coverage", 1));
+
+        Claim limited = enrichment.UnattachedFindings.Single(c => c.Fingerprint == "stub-fingerprint");
+        limited.Confidence.LimitingFactors.Should().ContainSingle().Which.Should().Contain("7 of 10 stub items before the stub limit");
+        limited.Confidence.Composite.Should().Be(ConfidenceBreakdown.MeasurementCertain.Composite);
+
+        enrichment.UnattachedFindings.Single(c => c.Fingerprint == "other-fingerprint").Confidence.LimitingFactors.Should().BeEmpty();
+    }
+
     private sealed class FakeRuleFactory : ISynthesisRuleFactory
     {
         private readonly IReadOnlyList<ISynthesisRule> _rules;
-        public FakeRuleFactory(IReadOnlyList<ISynthesisRule> rules) => _rules = rules;
+        private readonly IReadOnlyList<ICoverageRule> _coverageRules;
+
+        public FakeRuleFactory(IReadOnlyList<ISynthesisRule> rules, IReadOnlyList<ICoverageRule>? coverageRules = null)
+        {
+            _rules = rules;
+            _coverageRules = coverageRules ?? [];
+        }
+
         public IReadOnlyList<ISynthesisRule> CreateRules() => _rules;
+        public IReadOnlyList<ICoverageRule> CreateCoverageRules() => _coverageRules;
+    }
+
+    private sealed class LimitedStubCoverageRule(string analyzer) : ICoverageRule
+    {
+        public string RuleId => "stub.coverage";
+        public int Version => 1;
+        public ObservationQuery Query { get; } = new() { ObservationTypes = ["stub.type"] };
+
+        public IReadOnlyList<CoverageRecord> Evaluate(ObservationMatchSet matched, SynthesisContext context) =>
+        [
+            new CoverageRecord(
+                new Capability("stub.capability"), new ArtifactId("stub-artifact"), CoverageStatus.Partial,
+                [new CoverageImpact(analyzer, CoverageImpactKind.Limited)], new CoverageBoundary(7, 10, "stub items", "stub limit")),
+        ];
     }
 
     private sealed class StubRule : ISynthesisRule

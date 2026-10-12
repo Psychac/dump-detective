@@ -4,7 +4,7 @@ Follows [m2-entities-plan.md](m2-entities-plan.md) (D5, deferred) and [m2c-entit
 Tracked as milestone **M2b** in [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path). It fills the dossier's Relations
 slot, which today reads "Not built yet" (`entityRelations` in `report.renderers.entities.js`).
 
-**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-3 done (1-2 on 2026-10-09, 3 on 2026-10-12); step 4 measured 2026-10-12, 4a (subscribes-to) done; 4b (dominator-tree) not started.
+**Status:** in progress. D1-D6 decided 2026-10-09; steps 1-3 done (1-2 on 2026-10-09, 3 on 2026-10-12); step 4 measured 2026-10-12, 4a (subscribes-to) done; 4b (dominator-tree) measured, not built.
 
 ## Goal
 
@@ -92,7 +92,16 @@ and all of those already exist.
      - **Direction:** pairs are stored lower id first, so a directed fact records the order in its source name (`fact: event.subscription`, or `... (reversed)` when the first subject had the higher id). The client turns that into "subscribes to this" on the publisher's page and "this subscribes to it" on the subscriber's; a pair related both ways shows both. Directed fact kinds are a short list in `EntityRelationBuilder` and the client.
      - **Tests:** an emission test (publisher first, one per group and subscriber type, none for an empty group, counts kept), 2 directed-naming tests, 1 panel mapping, conformance; harness 31 of 31 (2 new); full suite 1,777 passed, 66 skipped.
      - **Real dump:** 1,980 facts (+2%: 97,719 to 99,699) covering all 1,027 groups, 440 distinct (publisher, subscriber) pairs, 135 subscriber types, 83 publishers; **the sum of `subscription.count` (25,863) equals the sum of the groups' subscriber counts exactly**, which shows nothing was dropped; no new entities; 433 relation pairs added (the 7 self-subscriptions relate nothing), none lost or re-sourced; claims identical; report.json +11 KB; 0 warnings. Results: `m2-step1/verify-m2b4a-results.txt`.
-   - **4b. Dominator-tree relations** *(pending, investigate only if wanted)*
+   - **4b. Dominator-tree relations** *(measured 2026-10-12, not built)*
+     - **Method:** a throwaway test (deleted, never committed) read the existing cache without loading the dump for the counts, then loaded the dump once to resolve type names. For each reachable object it paired the type of its immediate dominator with its own type.
+     - **Coverage:** the tree holds 6,686,485 of the dump's 14,620,162 objects; the other 7,933,677 are unreachable, not folded leaves (running over all objects instead of the tree's rows gave the same pairs). Of the reachable ones, 217,332 hang directly off a GC root and 6,469,153 have an object as immediate dominator; those are the pairs.
+     - **Volume:** 16,914 distinct (dominator type, object type) pairs by method table, **16,739 by canonical type name**: 17% on top of the 99,699 observations if each became a fact. Pair count follows the number of distinct type pairs, not objects, so it does not scale with heap size the way per-object facts would, but a larger dump can have more type pairs. The count pass took seconds.
+     - **Entities:** all 9,403 types in the pairs are already Type entities in the report, so **0 new entities**; every pair would link two existing pages.
+     - **Skew:** 7,393 pairs have 2 or more objects, 1,249 have 100 or more (98.5% of the objects), 111 have 10,000 or more. Per the no-top-N rule every pair would be kept; the long tail costs about 9,500 single-object pairs.
+     - **Shape (names, rough heuristic):** 1,202 pairs (532,263 objects) involve no System or Microsoft type, so they are application relations; 913 pairs are plain container storage (`X[]` to `X`); 706 are the same generic type. Largest: `System.Data.DataTable` to `System.Data.DataRow` (1,226,677 objects), `System.String[]` to `System.String` (798,816), `CompanyMasterData[]` to `CompanyMasterData` (192,926), `RuntimeTypeCache` to `RuntimeMethodInfo` (121,091). The widest dominator type dominates 3,002 different types.
+     - **Meaning:** exact and structural: "freeing every object of type A would free these objects of type B". It answers "what holds this type" in terms of other types, the thing M2b's goal names. It also includes implementation structure (array holds elements), which is true but not news.
+     - **If built:** one directed fact per (dominator type, object type) with an object count (the existing directed-fact mechanism and "dominates" / "held by" wording); emitted from a streaming pass over the dominator tree (the measurement kept 233 MB of address and method-table arrays in memory, which a real implementation should replace with the memory-mapped columns); a type page with thousands of neighbours (String) relies on the collapsed lists already built.
+     - **Open:** whether 17% more observations is acceptable; whether to show the object count on each relation; the cost on the 25 GB dump (not measured, and not run: it takes about 25 minutes). Files: `m2-step1/dominator-pairs-results.txt`, `dominator-pairs.tsv`, `dominator-pairs-analysis.txt`.
    - **Not pursued:** held-by-static (blocked), GC root to target (not a relation), chain-based retains (capped samples).
 
 ## Verification (every step)

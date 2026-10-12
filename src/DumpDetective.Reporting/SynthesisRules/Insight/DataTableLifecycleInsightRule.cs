@@ -22,8 +22,11 @@ internal sealed class DataTableLifecycleInsightRule : ISynthesisRule
     private const long DataRowHeapThreshold = 10_000;
 
     // Exact, not a substring: DataRowView, DataRowCollection and compiler-generated types that merely mention DataRow (for example
-    // Enumerable+<CastIterator>d__<System.Data.DataRow>) are not rows.
+    // Enumerable+<CastIterator>d__<System.Data.DataRow>) are not rows. The same holds for columns and tables. A strongly typed
+    // DataTable subclass (a generated "OrdersDataTable") is therefore not counted; the finalizer observations name only the real type.
     private const string DataRowTypeName = "System.Data.DataRow";
+    private const string DataColumnTypeName = "System.Data.DataColumn";
+    private const string DataTableTypeName = "System.Data.DataTable";
 
     public string RuleId => "insight.datatable-lifecycle";
     public int Version => 1;
@@ -50,12 +53,12 @@ internal sealed class DataTableLifecycleInsightRule : ISynthesisRule
                 case "type.finalizable-population":
                 {
                     long gen2Count = (long)observation.Measures["gen2.count"].Value;
-                    if (typeName.Contains("DataColumn", StringComparison.OrdinalIgnoreCase))
+                    if (typeName == DataColumnTypeName)
                     {
                         dataColumnFinalizer += gen2Count;
                         derivedFrom.Add(observation.Id);
                     }
-                    else if (typeName.Contains("DataTable", StringComparison.OrdinalIgnoreCase))
+                    else if (typeName == DataTableTypeName)
                     {
                         dataTableFinalizer += gen2Count;
                         derivedFrom.Add(observation.Id);
@@ -64,12 +67,12 @@ internal sealed class DataTableLifecycleInsightRule : ISynthesisRule
                 }
                 case "finalizer.queue-entry":
                 {
-                    if (typeName.Contains("DataColumn", StringComparison.OrdinalIgnoreCase))
+                    if (typeName == DataColumnTypeName)
                     {
                         dataColumnFinalizer++;
                         derivedFrom.Add(observation.Id);
                     }
-                    else if (typeName.Contains("DataTable", StringComparison.OrdinalIgnoreCase))
+                    else if (typeName == DataTableTypeName)
                     {
                         dataTableFinalizer++;
                         derivedFrom.Add(observation.Id);

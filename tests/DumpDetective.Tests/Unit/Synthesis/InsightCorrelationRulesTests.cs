@@ -376,6 +376,35 @@ public sealed class InsightCorrelationRulesTests
             findings.Should().BeEmpty();
         }
 
+        [Theory]
+        [InlineData("System.Data.DataColumnCollection")]
+        [InlineData("Ns.MyDataColumnHelper")]
+        public async Task DataColumnFinalizers_CountOnlyTheRealDataColumnType(string lookalike)
+        {
+            var matched = new ObservationMatchSet([FinalizablePopulation(lookalike, gen2Count: 5_000)]);
+
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+
+        [Theory]
+        [InlineData("System.Data.DataTableCollection")]
+        [InlineData("System.Data.DataTableReader")]
+        public async Task DataTableFinalizers_CountOnlyTheRealDataTableType(string lookalike)
+        {
+            var matched = new ObservationMatchSet(
+            [
+                FinalizablePopulation("System.Data.DataColumn", gen2Count: 120),
+                FinalizablePopulation(lookalike, gen2Count: 7_000),
+            ]);
+
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle();
+            findings[0].Narrative.Should().NotContain("DataTable ×");
+        }
+
         [Fact]
         public async Task BelowBothThresholds_ReturnsEmpty()
         {

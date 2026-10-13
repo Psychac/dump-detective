@@ -4,7 +4,7 @@ Follows [m2b-relations-plan.md](m2b-relations-plan.md). Tracked as milestone **M
 [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path); the model is
 [§ 7](ReportSystemVision.md#7-coverage-and-negative-space). Depends only on M1 (claims), so it does not wait on M4 or M5.
 
-**Status:** planned 2026-10-12, nothing built. Steps 1-2 done, steps 4-7 done, step 8 done (not-comparable path unit-tested only); D1-D6 decided 2026-10-12, with D6 points 3-4 open until step 8's reading of the trend comparers.
+**Status:** done 2026-10-13. D1-D6 decided 2026-10-12 (D6 points 3-4 turned out moot). Steps 1-8 built (3 merged into 4); the not-comparable trend path is unit-tested only, and the strip, panel and unknown-cell styling were not looked at in a browser.
 
 ## Goal
 

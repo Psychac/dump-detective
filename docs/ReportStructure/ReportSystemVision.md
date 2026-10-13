@@ -2,8 +2,11 @@
 
 ## Status
 
-Vision + specification. **M1 (claims) shipped 2026-10-06** — see [m1-claims-plan.md](m1-claims-plan.md) for what
-was built and where it deviated; the rest is not implemented, and adopting it whole is a multi-quarter
+Vision + specification. **M1 (claims) shipped 2026-10-06, M2 (entities) 2026-10-08, M2b (relations) and M2c (more entity
+kinds) by 2026-10-12, M3 (coverage) 2026-10-13** — see [m1-claims-plan.md](m1-claims-plan.md),
+[m2-entities-plan.md](m2-entities-plan.md), [m2b-relations-plan.md](m2b-relations-plan.md),
+[m2c-entity-kinds-plan.md](m2c-entity-kinds-plan.md) and [m3-coverage-plan.md](m3-coverage-plan.md) for what was built and
+where each deviated; M4 (payload) and M5 (query) and the rest are not implemented, and adopting the whole is a multi-quarter
 program. [§19](#19-minimum-viable-path) gives the subset worth building regardless.
 
 Third sibling to [ReportFormatCleanSlate.md](ReportFormatCleanSlate.md) (what the report contains)
@@ -1554,7 +1557,7 @@ platform refactor to complete first.
 | **M2 — Entities** *(done 2026-10-08; [plan](m2-entities-plan.md))* | entity table replacing the string pool; type + thread dossier | investigate by type and thread instead of by analyzer; ~9.9 MB of duplicate names disappears as a side effect; per-thread retention finally surfaces | nothing |
 | **M2b — Relations** *(done 2026-10-12 (held-by-static blocked); [plan](m2b-relations-plan.md); deferred from [M2 D5](m2-entities-plan.md#deferred-work-do-not-drop))* | claims gain `relations` (retains / retained-by / subscribes-to / supports / contradicts); dossier Relations panel built | "what holds this type" and "what does this claim contradict" answered in one panel, without reading root-chain text | M1, M2 |
 | **M2c — More entity kinds** *(done 2026-10-09; [plan](m2c-entity-kinds-plan.md))* | dossiers for module, object, method and the new AppDomain kind; GC root, handle and memory segment measured and deliberately not built (see plan step 7) | investigate by module, root, handle, segment or AppDomain, not only by type and thread | M2 |
-| **M3 — Coverage** *(planned 2026-10-12; [plan](m3-coverage-plan.md))* | `CoverageRecord` promoted out of the appendix; `unknown` as a real value with a reason; negative claims published | "we looked and did not find it" becomes visible; caveats become specific | M1 |
+| **M3 — Coverage** *(done 2026-10-13; [plan](m3-coverage-plan.md))* | `CoverageRecord` promoted out of the appendix; `unknown` as a real value with a reason; negative claims published | "we looked and did not find it" becomes visible; caveats become specific | M1 |
 | **M4 — Payload** | segmented envelope + column store + virtualized tables | opens instantly; full 68,576 rows genuinely navigable | nothing |
 | **M5 — Query** | filter chips + `dd.query()` over a plain predicate object, URL = query (see [§12.1](#121-the-query-algebra) — the full grammar is a later growth target, not this milestone) | uncapped data becomes navigable; links are shareable and testable | M2, M4 |
 

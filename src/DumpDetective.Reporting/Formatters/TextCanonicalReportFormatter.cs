@@ -37,7 +37,7 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
                     sb.AppendLine($"  - {path}");
             }
             // T2.2: Lifecycle summary
-            sb.AppendLine($"Finding lifecycle:  New={trendDoc.TrendNewFindingCount}  Persistent={trendDoc.TrendPersistentFindingCount}  Resolved={trendDoc.TrendResolvedFindingCount}");
+            sb.AppendLine($"Finding lifecycle:  New={trendDoc.TrendNewFindingCount}  Persistent={trendDoc.TrendPersistentFindingCount}  Resolved={trendDoc.TrendResolvedFindingCount}{(trendDoc.TrendNotComparableFindingCount > 0 ? $"  NotComparable(coverage differs)={trendDoc.TrendNotComparableFindingCount}" : "")}");
             sb.AppendLine();
         }
         if (doc.HealthScorecard is { } scorecard)

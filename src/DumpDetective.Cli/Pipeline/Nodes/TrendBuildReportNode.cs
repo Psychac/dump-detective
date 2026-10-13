@@ -52,7 +52,8 @@ internal sealed class TrendBuildReportNode(
                 DateTime.UtcNow,
                 state.StageMemoryStats,
                 MemoryStats: null,
-                Observations: state.Observations));
+                Observations: state.Observations,
+                Coverage: state.Coverage));
         }
 
         AnalysisSnapshot[] snapshots = executions
@@ -74,7 +75,9 @@ internal sealed class TrendBuildReportNode(
             NewFindings: lifecycle.NewFindings,
             PersistentFindings: lifecycle.PersistentFindings,
             ResolvedFindings: lifecycle.ResolvedFindings,
-            SeverityChanges: lifecycle.SeverityChanges);
+            SeverityChanges: lifecycle.SeverityChanges,
+            NotComparableFindings: lifecycle.NotComparable,
+            CoverageChanges: CoverageLifecycleComparer.Compare(baseline, current).Changes);
 
         if (sessionState.Resolved.DiagnosticMode)
             TrendConsolePresenter.PrintTrendOverallSummary(trendData, sessionState.Resolved.DiagnosticMode);
@@ -87,7 +90,8 @@ internal sealed class TrendBuildReportNode(
             trendData);
 
         sessionState.Observations = executions.SelectMany(e => e.Observations).ToArray();
-        trendDoc = trendDoc with { Coverage = sessionState.Coverage, CoverageView = CoverageProse.Build(sessionState.Coverage) };
+        IReadOnlyList<DumpDetective.Sdk.Artifacts.CoverageRecord> currentCoverage = currentExecution.Coverage ?? sessionState.Coverage;
+        trendDoc = trendDoc with { Coverage = currentCoverage, CoverageView = CoverageProse.Build(currentCoverage) };
         sessionState.ReportDocument = trendDoc;
         sessionState.Runs = executions.SelectMany(e => e.Runs).ToArray();
         sessionState.AnalysisElapsed = sessionState.PipelineStopwatch.Elapsed;
@@ -117,6 +121,7 @@ internal sealed class TrendBuildReportNode(
             Findings: findings,
             DomainResults: domains,
             GeneratedAtUtc: execution.GeneratedAtUtc,
-            IncidentContext: execution.IncidentContext);
+            IncidentContext: execution.IncidentContext,
+            Coverage: execution.Coverage);
     }
 }

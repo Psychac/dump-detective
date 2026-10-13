@@ -151,6 +151,8 @@ internal sealed record TrendReportDocument : AnalysisReportDocument
     public int TrendNewFindingCount { get; init; }
     public int TrendPersistentFindingCount { get; init; }
     public int TrendResolvedFindingCount { get; init; }
+    /// <summary>Findings present in only one of the first and last dump whose analyzer was covered differently in the two, so neither new nor resolved can be claimed.</summary>
+    public int TrendNotComparableFindingCount { get; init; }
     public TrendStoryRecord? TrendStory { get; init; } = null;
     /// <summary>
     /// Serialized trend sections (T2–T7) for the JavaScript renderer.

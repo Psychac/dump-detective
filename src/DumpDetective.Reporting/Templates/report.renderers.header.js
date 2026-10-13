@@ -667,6 +667,7 @@ export function buildExecutiveSummary(doc) {
     lcChip('New', newCount, 'new');
     lcChip('Persistent', persistentCount, 'persistent');
     lcChip('Resolved', resolvedCount, 'resolved');
+    lcChip('Not comparable', doc.trendNotComparableFindingCount > 0 ? Number(doc.trendNotComparableFindingCount) : null, 'persistent');
     lcChip('Net', net, net > 0 ? 'worse' : net < 0 ? 'better' : 'flat');
     lifecycle.appendChild(chips);
     sec.appendChild(lifecycle);

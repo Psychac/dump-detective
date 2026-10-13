@@ -107,7 +107,8 @@ internal sealed class DumpOrchestrationService(
                 {
                     Resolved = resolved with { DumpPath = dumpPath },
                     AllAnalyzers = allAnalyzers,
-                    ActiveAnalyzers = activeAnalyzers
+                    ActiveAnalyzers = activeAnalyzers,
+                    Coverage = coverage ?? []
                 };
                 artifactStates.Add((artifactState, keys));
 

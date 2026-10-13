@@ -1,3 +1,5 @@
+using DumpDetective.Reporting.Trend;
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
 
@@ -39,6 +41,27 @@ internal static class TrendAppendixBuilder
             blocks.Add(new TextBlock("No findings were resolved between baseline and current."));
         }
         blocks.Add(new CollapsibleSectionEndBlock());
+
+        // ── T7a2: Not comparable, and coverage changes ───────────────────────
+        IReadOnlyList<Claim> notComparable = trendData.NotComparableFindings ?? [];
+        IReadOnlyList<CoverageChange> coverageChanges = trendData.CoverageChanges ?? [];
+        if (notComparable.Count > 0 || coverageChanges.Count > 0)
+        {
+            blocks.Add(new CollapsibleSectionBeginBlock($"Not comparable: coverage differs ({notComparable.Count})"));
+            blocks.Add(new TextBlock("These findings appear in only one of the first and last dump, and their analyzer was covered differently in the two, " +
+                "so they are neither reported as new nor as resolved."));
+            foreach (CoverageChange change in coverageChanges)
+                blocks.Add(new ListItemBlock(change.Text, 0));
+            if (notComparable.Count > 0)
+            {
+                blocks.Add(new TableBlock(
+                    Caption: null,
+                    Headers: ["Severity", "Analyzer", "Title"],
+                    Rows: notComparable.OrderByDescending(f => f.Severity)
+                        .Select(f => new TableRow([new TableCell(f.Severity.ToString()), new TableCell(f.Analyzer), new TableCell(f.Title)])).ToArray()));
+            }
+            blocks.Add(new CollapsibleSectionEndBlock());
+        }
 
         // ── T7b: Analyzer Coverage Map ───────────────────────────────────────
         blocks.Add(new CollapsibleSectionBeginBlock("Analyzer Coverage Map"));

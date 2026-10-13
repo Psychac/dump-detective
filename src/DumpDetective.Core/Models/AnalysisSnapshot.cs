@@ -22,4 +22,6 @@ internal sealed record AnalysisSnapshot(
 	IReadOnlyList<Claim> Findings,
 	IReadOnlyDictionary<string, AnalyzerDomainResult> DomainResults,
 	DateTime GeneratedAtUtc,
-	AnalysisIncidentContext? IncidentContext = null);
+	AnalysisIncidentContext? IncidentContext = null,
+	/// <summary>This dump's coverage records (session records plus those the coverage rules produced); null when not resolved.</summary>
+	IReadOnlyList<DumpDetective.Sdk.Artifacts.CoverageRecord>? Coverage = null);

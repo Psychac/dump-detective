@@ -160,6 +160,7 @@ internal sealed class TrendReportComposer(
             TrendNewFindingCount = trendData.NewFindings.Count,
             TrendPersistentFindingCount = trendData.PersistentFindings.Count,
             TrendResolvedFindingCount = trendData.ResolvedFindings.Count,
+            TrendNotComparableFindingCount = trendData.NotComparableFindings?.Count ?? 0,
             TrendStory = TrendStoryBuilder.Build(trendData),
             HealthScorecard = trendScorecard,
             IncidentContext = currentIncidentContext is null
@@ -567,4 +568,6 @@ internal sealed record TrendReportData(
     IReadOnlyList<Claim> NewFindings,
     IReadOnlyList<Claim> PersistentFindings,
     IReadOnlyList<Claim> ResolvedFindings,
-    IReadOnlyList<FindingSeverityChange> SeverityChanges);
+    IReadOnlyList<FindingSeverityChange> SeverityChanges,
+    IReadOnlyList<Claim>? NotComparableFindings = null,
+    IReadOnlyList<CoverageChange>? CoverageChanges = null);

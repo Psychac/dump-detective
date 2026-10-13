@@ -12,4 +12,5 @@ internal sealed record TrendDumpExecution(
     DateTime GeneratedAtUtc,
     IReadOnlyList<(string StageName, AnalyzerMemoryStats Stats)> StageMemoryStats,
     AnalyzerMemoryStats? MemoryStats,
-    IReadOnlyList<Observation> Observations);
+    IReadOnlyList<Observation> Observations,
+    IReadOnlyList<DumpDetective.Sdk.Artifacts.CoverageRecord>? Coverage = null);

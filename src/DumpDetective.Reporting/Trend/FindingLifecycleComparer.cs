@@ -8,7 +8,12 @@ internal sealed record FindingLifecycleResult(
     IReadOnlyList<Claim> NewFindings,
     IReadOnlyList<Claim> PersistentFindings,
     IReadOnlyList<Claim> ResolvedFindings,
-    IReadOnlyList<FindingSeverityChange> SeverityChanges);
+    IReadOnlyList<FindingSeverityChange> SeverityChanges,
+    IReadOnlyList<Claim>? NotComparableFindings = null)
+{
+    /// <summary>Findings that would read as new or resolved only because their analyzer's coverage differs between the two dumps.</summary>
+    public IReadOnlyList<Claim> NotComparable { get; init; } = NotComparableFindings ?? [];
+}
 
 /// <summary>
 /// A persistent finding (same <see cref="Claim.Fingerprint"/> in both snapshots)
@@ -44,12 +49,20 @@ internal static class FindingLifecycleComparer
         var resolvedFindings = new List<Claim>();
         var severityChanges = new List<FindingSeverityChange>();
 
+        IReadOnlySet<string> notComparableAnalyzers = CoverageLifecycleComparer.Compare(baseline, current).NotComparableAnalyzers;
+        var notComparableFindings = new List<Claim>();
+
         foreach (string key in allKeys)
         {
             bool inBaseline = baselineByKey.ContainsKey(key);
             bool inCurrent = currentByKey.ContainsKey(key);
 
-            if (inCurrent && !inBaseline)
+            // Present in only one dump, and its analyzer was covered differently in the two: the absence may be the coverage, not the process.
+            if (inCurrent != inBaseline && notComparableAnalyzers.Contains((inCurrent ? currentByKey[key] : baselineByKey[key]).Analyzer))
+            {
+                notComparableFindings.Add(inCurrent ? currentByKey[key] : baselineByKey[key]);
+            }
+            else if (inCurrent && !inBaseline)
             {
                 newFindings.Add(currentByKey[key]);
             }
@@ -68,6 +81,6 @@ internal static class FindingLifecycleComparer
             }
         }
 
-        return new FindingLifecycleResult(newFindings, persistentFindings, resolvedFindings, severityChanges);
+        return new FindingLifecycleResult(newFindings, persistentFindings, resolvedFindings, severityChanges, notComparableFindings);
     }
 }

@@ -68,6 +68,7 @@ globalThis.history = { replaceState() { } };
 
 const templates = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/DumpDetective.Reporting/Templates');
 const entities = await import(pathToFileURL(path.join(templates, 'report.renderers.entities.js')).href);
+const sections = await import(pathToFileURL(path.join(templates, 'report.renderers.sections.js')).href);
 const panels = await import(pathToFileURL(path.join(templates, 'report.renderers.panels.js')).href);
 
 // Fact kinds are indexes into entitySummary.factKinds; a group is [factKindIndex, count, stats].
@@ -432,4 +433,20 @@ test('appendix shows the coverage panel with each group, its claim links and the
 
 test('appendix is absent when there is neither an appendix nor a coverage view', function () {
   assert.equal(panels.buildAppendix({}), null);
+});
+
+// ── Cells with no value ──────────────────────────────────────────────────────
+
+test('a cell with no value shows its mark and carries a reason, and a value cell is unaffected', function () {
+  assert.equal(sections.extractCellDisplay({ u: 'nm' }), '—');
+  assert.equal(sections.extractCellDisplay({ u: 'na' }), 'n/a');
+  assert.equal(sections.extractCellDisplay({ u: 'amb' }), '?');
+  assert.match(sections.unknownCell({ u: 'nm' }).label, /Not measured/);
+  assert.match(sections.unknownCell({ u: 'na' }).label, /Not applicable/);
+  assert.match(sections.unknownCell({ u: 'amb' }).label, /Ambiguous/);
+  assert.equal(sections.unknownCell('text'), null);
+  assert.equal(sections.unknownCell(0), null);
+  assert.equal(sections.unknownCell({ display: 'x', entityId: 3 }), null);
+  assert.equal(sections.extractCellDisplay(0), '0');
+  assert.equal(sections.extractCellDisplay({ display: 'Foo', entityId: 3 }), 'Foo');
 });

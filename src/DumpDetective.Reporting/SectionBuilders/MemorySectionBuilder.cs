@@ -124,13 +124,15 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(t.TypeName),
                     Cell(t.Count.ToString("N0"), t.Count),
                     Cell(FormatHelper.FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
-                    Cell(t.LohBytes > 0 ? FormatHelper.FormatBytes(t.LohBytes) : "—"),
+                    Cell(FormatHelper.FormatBytes(t.LohBytes), (long)Math.Min(t.LohBytes, long.MaxValue)),
                     Cell(t.AverageSize > 0 ? FormatHelper.FormatBytes(t.AverageSize) : "—"),
-                    Cell(t.EstimatedRetainedBytes > 0 ? FormatHelper.FormatBytes(t.EstimatedRetainedBytes) : "—"),
+                    // Only the largest types by shallow size are walked for retained bytes, and the value defaults to zero, so zero here
+                    // means not measured. A walked type that truly retained nothing would read the same; the walk always includes the object itself.
+                    t.EstimatedRetainedBytes > 0 ? Cell(FormatHelper.FormatBytes(t.EstimatedRetainedBytes), (long)Math.Min(t.EstimatedRetainedBytes, long.MaxValue)) : UnknownCell(UnknownReason.NotMeasured),
                     Cell($"0x{t.SampleAddress:X}"),
                     Cell(t.ModuleName ?? "—")));
             }
-                    compactTables.Add(STCompact("Top types", new[] { CHType("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Sample Addr"), CHModule("Module") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                    compactTables.Add(STCompact("Top types", new[] { CHType("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Sample Addr"), CHModule("Module") }, rows.Select(r => R(r.Cells.Select(CompactValue).ToArray())).ToArray()));
         }
 
         if (d.SizeBucketHistogram is { Count: > 0 })

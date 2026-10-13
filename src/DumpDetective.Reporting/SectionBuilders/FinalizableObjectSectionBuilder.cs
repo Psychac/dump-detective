@@ -69,7 +69,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
             compactTables.Add(STCompact(
                 "Top finalizer queue entries by estimated retained size",
                 new[] { CHObject("Address"), CHType("Type Name"), CH("Generation"), CH("Shallow Size","bytes"), CH("Est. Retained","bytes"), CH("Exact?"), CH("IDisposable"), CH("Disposed Field Found"), CH("Disposed"), CH("Critical Finalizer") },
-                BuildQueueRows(d.TopQueueEntriesByRetainedSize).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                BuildQueueRows(d.TopQueueEntriesByRetainedSize).Select(r => R(r.Cells.Select(CompactValue).ToArray())).ToArray()));
         }
 
         bool hasTruncatedRootPathSearch = false;
@@ -147,8 +147,10 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
                 Cell(FormatHelper.FormatBytes(e.EstimatedRetainedBytes), (long)e.EstimatedRetainedBytes),
                 Cell(e.RetainedBytesIsExact ? "Yes" : "No"),
                 Cell(e.IsDisposableType ? "Yes" : "No"),
-                Cell(e.IsDisposableType ? (e.DisposedFieldFound ? "Yes" : "No") : "N/A"),
-                Cell(!e.IsDisposableType ? "N/A" : (!e.DisposedFieldFound ? "Unknown" : (e.DisposedFieldValue ? "Yes" : "No"))),
+                // Not disposable: the question does not apply. Disposable but no disposed field found: it was looked for and cannot decide.
+                e.IsDisposableType ? Cell(e.DisposedFieldFound ? "Yes" : "No") : UnknownCell(UnknownReason.NotApplicable),
+                !e.IsDisposableType ? UnknownCell(UnknownReason.NotApplicable)
+                    : (!e.DisposedFieldFound ? UnknownCell(UnknownReason.Ambiguous) : Cell(e.DisposedFieldValue ? "Yes" : "No")),
                 Cell(e.IsCriticalFinalizer ? "Yes" : "No"),
             ]));
         }

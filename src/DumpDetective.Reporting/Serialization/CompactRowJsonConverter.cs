@@ -27,6 +27,7 @@ internal sealed class CompactRowJsonConverter : JsonConverter<CompactRow>
                 JsonTokenType.True => true,
                 JsonTokenType.False => false,
                 JsonTokenType.Null => null,
+                JsonTokenType.StartObject => JsonSerializer.Deserialize<DumpDetective.Reporting.Models.UnknownCell>(ref reader, options),
                 _ => throw new JsonException($"Unexpected token {reader.TokenType} in CompactRow."),
             });
         }

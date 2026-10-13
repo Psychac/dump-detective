@@ -1295,3 +1295,8 @@ body.reading-mode-forensics .toc-incident-only {
 .coverage-group--not-supplied .coverage-group__title { color: var(--sev-neutral-text); }
 .coverage-group__lines { margin: 0; padding-left: 1.2rem; }
 .coverage-group__complete { margin: 0; word-break: break-word; }
+
+/* A cell with no value: muted, with the reason on hover. Not-measured and ambiguous read as gaps, not-applicable as quietly absent. */
+.cell-unknown { color: var(--muted); }
+.cell-unknown--na { opacity: 0.6; }
+.cell-unknown--amb { font-weight: 600; }

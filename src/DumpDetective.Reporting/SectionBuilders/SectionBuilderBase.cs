@@ -55,6 +55,13 @@ internal abstract class SectionBuilderBase
     protected static CollapsibleSectionBeginBlock CollapseBegin(string title) => new(title);
     protected static CollapsibleSectionEndBlock CollapseEnd() => new();
     protected static TableRow Row(params TableCell[] cells) => new(cells);
+
+    // A cell with no value, and why. Never for zero: a measured zero is a value (docs/ReportStructure/ReportSystemVision.md § 7.3).
+    protected static TableCell UnknownCell(UnknownReason reason) => new(UnknownReasonText.Mark(reason), Unknown: reason);
+
+    // The compact-table value of a cell: the unknown marker, else the raw number, else the display text.
+    protected static object? CompactValue(TableCell cell) =>
+        cell.Unknown is { } reason ? new Models.UnknownCell(reason) : (object?)(cell.RawValue ?? (object?)cell.Display);
     protected static TableCell Cell(string display, double? raw = null)
     {
         if (raw.HasValue)

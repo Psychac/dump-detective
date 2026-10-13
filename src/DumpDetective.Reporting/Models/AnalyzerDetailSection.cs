@@ -340,7 +340,7 @@ internal sealed record NextStepsBlock(IReadOnlyList<NextStepLink> Links) : Secti
 internal sealed record NextStepLink(string Label, string SectionId);
 
 internal sealed record TableRow(IReadOnlyList<TableCell> Cells);
-internal sealed record TableCell(string Display, double? RawValue = null, string? LinkTarget = null);   // RawValue for client-side sort; LinkTarget for anchored links
+internal sealed record TableCell(string Display, double? RawValue = null, string? LinkTarget = null, UnknownReason? Unknown = null);   // RawValue for client-side sort; LinkTarget for anchored links
 
 internal sealed record CollapsibleSectionBeginBlock(string Title) : SectionBlock;
 internal sealed record CollapsibleSectionEndBlock : SectionBlock;

@@ -33,7 +33,20 @@ function resolvePooledRow(values, headerMeta) {
   return resolved;
 }
 
-function extractCellDisplay(cellData) {
+// A cell with no value is {u: 'nm' | 'na' | 'amb'}: not measured, not applicable, ambiguous (ReportSystemVision.md 7.3).
+const UNKNOWN_CELLS = {
+  nm: { mark: '\u2014', label: 'Not measured' },
+  na: { mark: 'n/a', label: 'Not applicable' },
+  amb: { mark: '?', label: 'Ambiguous: looked for, and the result cannot decide' },
+};
+
+export function unknownCell(cellData) {
+  return cellData && typeof cellData === 'object' && typeof cellData.u === 'string' ? (UNKNOWN_CELLS[cellData.u] || UNKNOWN_CELLS.nm) : null;
+}
+
+export function extractCellDisplay(cellData) {
+  const unknown = unknownCell(cellData);
+  if (unknown) return unknown.mark;
   if (cellData && cellData.display != null) return String(cellData.display);
   if (cellData != null) return String(cellData);
   return '';
@@ -496,6 +509,11 @@ export function buildAnalyzerSection(section, i) {
                   td.textContent = extractCellDisplay(cellData);
                 }
                 if (cellData && cellData.entityId != null) decorateEntityCell(td, cellData.entityId, td.textContent);
+                const unknown = unknownCell(cellData);
+                if (unknown) {
+                  td.classList.add('cell-unknown', 'cell-unknown--' + cellData.u);
+                  td.title = unknown.label;
+                }
               tr.appendChild(td);
             }
             if (limit > 0 && rowCount > limit && ri >= limit) {

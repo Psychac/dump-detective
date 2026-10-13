@@ -151,6 +151,25 @@ public sealed class TrendAnalyzerTests
     }
 
     [Fact]
+    public void CompareAll_AnAnalyzerOwnedByBothAComparerAndTheObservationDiffer_IsOneResult()
+    {
+        TrendAnalyzer analyzer = new([new MemoryScopedDeltaComparer()]);
+
+        Observation baseline = MakeHeadlineObservation("heap.memory-composition",
+            ("total.bytes", new Measure(10.0, MeasureUnit.Bytes, MeasureSemantics.Absolute)));
+        Observation current = MakeHeadlineObservation("heap.memory-composition",
+            ("total.bytes", new Measure(30.0, MeasureUnit.Bytes, MeasureSemantics.Absolute)));
+
+        IReadOnlyList<AnalyzerTrendResult> results = analyzer.CompareAll(
+            MakeSnapshot(0, "Memory Analysis", new ScopedTestDomainResult(0, 0, 0)),
+            MakeSnapshot(1, "Memory Analysis", new ScopedTestDomainResult(0, 0, 0)),
+            [baseline], [current]);
+
+        AnalyzerTrendResult result = results.Should().ContainSingle().Subject;
+        result.Deltas.Select(d => d.Key).Should().BeEquivalentTo("type.bytes", "heap.memory-composition::total.bytes");
+    }
+
+    [Fact]
     public void CompareAll_IgnoresObservationsWithNoOwningAnalyzer()
     {
         TrendAnalyzer analyzer = new([]);
@@ -242,6 +261,15 @@ public sealed class TrendAnalyzerTests
     }
 
     private sealed record ScopedTestDomainResult(double Total, double EntityA, double EntityB) : AnalyzerDomainResult;
+
+    // A comparer that still owns an analyzer's scoped deltas while the observation differ owns its headline ones (Memory Analysis).
+    private sealed class MemoryScopedDeltaComparer : IAnalyzerTrendComparer
+    {
+        public string AnalyzerName => "Memory Analysis";
+        public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result) => [];
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current) =>
+            [new MetricDelta("type.bytes", "App.Type", 1, 2, 1, 100, "bytes", MetricTrendDirection.HigherIsWorse)];
+    }
 
     private sealed class ScopedTestTrendComparer : IAnalyzerTrendComparer
     {

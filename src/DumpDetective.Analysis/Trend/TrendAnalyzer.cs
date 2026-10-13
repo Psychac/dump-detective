@@ -47,7 +47,28 @@ namespace DumpDetective.Analysis.Trend
             if (baselineObservations is { Count: > 0 } && currentObservations is { Count: > 0 })
                 results.AddRange(CompareObservations(baselineObservations, currentObservations));
 
-            return results;
+            return MergeByAnalyzer(results);
+        }
+
+        // A comparer still owning an analyzer's scoped metrics and the observation differ owning its headline metrics both
+        // produce a result under the same analyzer name; consumers key by name, so they must be one result.
+        private static IReadOnlyList<AnalyzerTrendResult> MergeByAnalyzer(List<AnalyzerTrendResult> results)
+        {
+            var merged = new List<AnalyzerTrendResult>(results.Count);
+            var indexByName = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (AnalyzerTrendResult result in results)
+            {
+                if (!indexByName.TryGetValue(result.AnalyzerName, out int index))
+                {
+                    indexByName[result.AnalyzerName] = merged.Count;
+                    merged.Add(result);
+                    continue;
+                }
+
+                merged[index] = new AnalyzerTrendResult(result.AnalyzerName, [.. merged[index].Deltas, .. result.Deltas]);
+            }
+
+            return merged;
         }
 
         /// <summary>The observation-differ-driven half of <see cref="CompareAll"/> — the 8 fully
@@ -124,7 +145,16 @@ namespace DumpDetective.Analysis.Trend
         {
             List<AnalyzerMetricTimeline> result = ExtractTimelineCore(snapshots, includeScoped: false).ToList();
             if (observationsPerSnapshot is not null)
-                result.AddRange(ExtractObservationTimeline(snapshots.Count, observationsPerSnapshot));
+            {
+                foreach (AnalyzerMetricTimeline fromObservations in ExtractObservationTimeline(snapshots.Count, observationsPerSnapshot))
+                {
+                    int existing = result.FindIndex(t => string.Equals(t.AnalyzerName, fromObservations.AnalyzerName, StringComparison.Ordinal));
+                    if (existing < 0)
+                        result.Add(fromObservations);
+                    else
+                        result[existing] = new AnalyzerMetricTimeline(fromObservations.AnalyzerName, [.. result[existing].Points, .. fromObservations.Points]);
+                }
+            }
 
             return result;
         }

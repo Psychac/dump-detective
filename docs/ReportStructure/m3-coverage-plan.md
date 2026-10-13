@@ -4,7 +4,7 @@ Follows [m2b-relations-plan.md](m2b-relations-plan.md). Tracked as milestone **M
 [ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path); the model is
 [§ 7](ReportSystemVision.md#7-coverage-and-negative-space). Depends only on M1 (claims), so it does not wait on M4 or M5.
 
-**Status:** planned 2026-10-12, nothing built. Steps 1-2 done, steps 4-6 done; D1-D6 decided 2026-10-12, with D6 points 3-4 open until step 8's reading of the trend comparers.
+**Status:** planned 2026-10-12, nothing built. Steps 1-2 done, steps 4-7 done; D1-D6 decided 2026-10-12, with D6 points 3-4 open until step 8's reading of the trend comparers.
 
 ## Goal
 
@@ -99,7 +99,11 @@ A reader can tell "we looked and found nothing" from "we did not look". Three vi
      - **Worth noticing:** 11 of the 20 top candidates had their root search truncated, which every earlier report hid behind the same dash as "never searched". The report now says so per cell; whether it deserves a claim is a separate question.
    - **Left:** about 28,000 placeholder cells in columns not classified (`Finalizable` empty cells in the long-lived and transient type tables, `Root Hint`, `Category`, the other tables).
    - **Not checked:** the muted styling and tooltip were not looked at in a browser.
-7. **Negative claims** (D4), a few rules, each with its own falsifier like any claim.
+7. **Negative claims** *(done 2026-10-13 in a narrower form than D4 sketched; decided with the user)*.
+   - **Finding:** the 9 `Normal` claims on the reference dump are not negatives: 1 computed absence (Lock Graph, 0 contested locks), 1 false (Static Root), 7 threshold results or snapshots. `StaticRootLeakDetector` never fires (memory note; fix held on `fix/static-root-detection`, 4d7e267b, about 454 s on this dump), so "No static-root retention candidates detected" described a check that cannot find anything. D4's coverage gate would not have caught it: every capability reads `Complete`, the defect is in the analyzer.
+   - **Built:** `StaticRootCoverageRule` replaces that claim with a `Partial` `heap.statics` record ("static roots are never enumerated: the detector filters on root kinds ClrMD does not report, so finding none says nothing"), the first coverage record that names a defect. `StaticRootSynthesisRule` version 2. **This rule must be deleted when the fix branch is merged.** The headline now reads 20 of 23 complete, 3 limited.
+   - **Not built:** a generic gate dropping `Normal` claims of limited analyzers. I built it, the real dump showed it also dropped `reference chain analysis::retention-coverage` (a threshold claim, and the claim `heap.root-paths` links to), and I removed it: `Normal` is not "computed absence". A real gate needs an explicit marker on the claim. Nothing limits Lock Graph today, so it stays unbuilt until something does; the seven threshold or descriptive `Normal` claims are untouched.
+   - **Real dump (103 s):** claims 81 → 80 (only `static root leak detection::no-candidates`); no other claim changed; `retention-coverage` still linked from its record; entities identical. Suite 1824 passed, 66 skipped. Results: `m2-step1/after-m3s7/`.
 8. **Trend** (D6): read the comparers and scoped timeline first, then make "not comparable" and coverage-change items real; verify on the two-dump and three-dump trend launch profiles (one at a time, foreground).
 
 ## Trend and coverage

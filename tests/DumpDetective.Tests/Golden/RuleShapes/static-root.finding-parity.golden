@@ -1,50 +1,9 @@
 rule: static-root.finding-parity
-version: 1
+version: 2
 [
   {
     "name": "none",
-    "claims": [
-      {
-        "fingerprint": "static root leak detection::no-candidates",
-        "severity": "Info",
-        "assertion": {
-          "predicate": "Normal",
-          "measure": {
-            "value": 0,
-            "unit": "Count",
-            "semantics": "Count"
-          },
-          "qualifiers": {
-            "location": "static roots retaining significant object graphs"
-          }
-        },
-        "support": [
-          {
-            "observations": [
-              "observations[0]"
-            ],
-            "why": "Counted no static roots above the significance cutoff."
-          }
-        ],
-        "counter": {
-          "statements": [
-            {
-              "observations": [
-                "observations[0]"
-              ],
-              "why": "Only static roots retaining significant object graphs are reported; smaller retention is outside this check."
-            }
-          ]
-        },
-        "falsifiedBy": [
-          {
-            "kind": "Windbg",
-            "test": "If the largest objects in !dumpheap -stat are rooted from a static field, a retaining static root was missed.",
-            "command": "!gcroot \u003Caddress of the largest object\u003E"
-          }
-        ]
-      }
-    ]
+    "claims": []
   },
   {
     "name": "warning",

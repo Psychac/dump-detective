@@ -38,7 +38,7 @@ internal sealed class StaticRootSynthesisRule : ISynthesisRule
     private const string AnalyzerName = "Static Root Leak Detection";
 
     public string RuleId => "static-root.finding-parity";
-    public int Version => 1;
+    public int Version => 2;
 
     public ObservationQuery Query { get; } = new()
     {
@@ -72,43 +72,9 @@ internal sealed class StaticRootSynthesisRule : ISynthesisRule
 
         long rootCount = (long)population.Measures["root.count"].Value;
 
+        // Finding none is not an absence while the detector cannot enumerate static roots: see StaticRootCoverageRule.
         if (rootCount == 0)
-        {
-            return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
-            {
-                Fingerprint = Fingerprint("no-candidates"),
-                Analyzer = AnalyzerName,
-                Category = "Leak",
-                Severity = Severity.Info,
-                Title = "No static-root retention candidates detected",
-                Narrative = "No static roots with significant retained object graphs were found.",
-                Recommendation = "No static-root action required for this snapshot.",
-                Tags = ["static-root", "retention"],
-                MetricValue = 0,
-                MetricUnit = "retained-bytes",
-                DerivedFrom = [population.Id],
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
-                Assertion = new Assertion
-                {
-                    Predicate = AssertionPredicate.Normal,
-                    Measure = ClaimParts.Count(0),
-                    Qualifiers = new AssertionQualifiers { Location = "static roots retaining significant object graphs" },
-                },
-                Support = [new EvidenceStatement([population.Id], "Counted no static roots above the significance cutoff.")],
-                Counter = Counter.Of(new EvidenceStatement(
-                    [population.Id],
-                    "Only static roots retaining significant object graphs are reported; smaller retention is outside this check.")),
-                FalsifiedBy =
-                [
-                    new FalsificationTest
-                    {
-                        Kind = FalsificationKind.Windbg,
-                        Command = "!gcroot <address of the largest object>",
-                        Test = "If the largest objects in !dumpheap -stat are rooted from a static field, a retaining static root was missed.",
-                    },
-                ],
-            }]);
-        }
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         ulong totalRetainedBytes = (ulong)population.Measures["retained.bytes"].Value;
 

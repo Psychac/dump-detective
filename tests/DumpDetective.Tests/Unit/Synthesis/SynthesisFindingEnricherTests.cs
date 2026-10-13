@@ -121,6 +121,18 @@ public sealed class SynthesisFindingEnricherTests
         enrichment.UnattachedFindings.Single(c => c.Fingerprint == "other-fingerprint").Confidence.LimitingFactors.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task EnrichAsync_KeepsANormalClaimOfALimitedAnalyzer_BecauseNormalIsNotAlwaysAnAbsence()
+    {
+        var enricher = new SynthesisFindingEnricher(new FakeRuleFactory(
+            [new StubRule("Stub Analyzer", "threshold-normal", AssertionPredicate.Normal)], [new LimitedStubCoverageRule("Stub Analyzer")]));
+
+        SynthesisEnrichment enrichment = await enricher.EnrichAsync([], [MakeObservation()], CancellationToken.None);
+
+        enrichment.UnattachedFindings.Should().ContainSingle(c => c.Fingerprint == "threshold-normal");
+        enrichment.Coverage.Single().Claims.Should().Equal("threshold-normal");
+    }
+
     private sealed class FakeRuleFactory : ISynthesisRuleFactory
     {
         private readonly IReadOnlyList<ISynthesisRule> _rules;
@@ -155,10 +167,13 @@ public sealed class SynthesisFindingEnricherTests
         private readonly string _analyzerName;
         private readonly string _fingerprint;
 
-        public StubRule(string analyzerName, string fingerprint)
+        private readonly AssertionPredicate? _predicate;
+
+        public StubRule(string analyzerName, string fingerprint, AssertionPredicate? predicate = null)
         {
             _analyzerName = analyzerName;
             _fingerprint = fingerprint;
+            _predicate = predicate;
             Query = new ObservationQuery { ObservationTypes = ["stub.type"] };
         }
 
@@ -180,6 +195,7 @@ public sealed class SynthesisFindingEnricherTests
                 Confidence = ConfidenceBreakdown.MeasurementCertain,
                 Analyzer = _analyzerName,
                 Category = "Stub",
+                Assertion = _predicate is { } predicate ? new Assertion { Predicate = predicate } : null,
             }];
             return ValueTask.FromResult(findings);
         }

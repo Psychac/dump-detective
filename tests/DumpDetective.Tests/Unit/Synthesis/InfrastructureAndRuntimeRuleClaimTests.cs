@@ -1,4 +1,5 @@
 using DumpDetective.Reporting.SynthesisRules;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
@@ -171,12 +172,21 @@ public sealed class InfrastructureAndRuntimeRuleClaimTests
     }
 
     [Fact]
-    public async Task StaticRoot_AbsenceClaim_StatesItsOwnLimit()
+    public async Task StaticRoot_FindingNoneIsNotPublishedAsAnAbsence_ItIsCoverage()
     {
-        Claim none = await SingleAsync(new StaticRootSynthesisRule(), [StaticRootPopulation(0, 0)]);
+        (await new StaticRootSynthesisRule().SynthesizeAsync(new ObservationMatchSet([StaticRootPopulation(0, 0)]), new SynthesisContext())).Should().BeEmpty();
 
-        none.Assertion!.Predicate.Should().Be(AssertionPredicate.Normal);
-        none.Counter!.Statements.Should().ContainSingle().Which.Why.Should().Contain("significant");
+        CoverageRecord record = new StaticRootCoverageRule()
+            .Evaluate(new ObservationMatchSet([StaticRootPopulation(0, 0)]), new SynthesisContext()).Should().ContainSingle().Subject;
+        record.Capability.Should().Be(new Capability(CapabilityVocabulary.HeapStatics));
+        record.Status.Should().Be(CoverageStatus.Partial);
+        record.Boundary!.Limit.Should().Contain("never enumerated");
+    }
+
+    [Fact]
+    public void StaticRootCoverage_RootsFound_ProducesNoRecord()
+    {
+        new StaticRootCoverageRule().Evaluate(new ObservationMatchSet([StaticRootPopulation(3, 30 * Mb)]), new SynthesisContext()).Should().BeEmpty();
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

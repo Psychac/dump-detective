@@ -38,24 +38,31 @@ internal sealed class CompactRowJsonConverter : JsonConverter<CompactRow>
     {
         writer.WriteStartArray();
         foreach (object? cell in value.Values)
-        {
-            switch (cell)
-            {
-                case null: writer.WriteNullValue(); break;
-                case string s: writer.WriteStringValue(s); break;
-                case bool b: writer.WriteBooleanValue(b); break;
-                case int i: writer.WriteNumberValue(i); break;
-                case long l: writer.WriteNumberValue(l); break;
-                case ulong ul: writer.WriteNumberValue(ul); break;
-                // Rounded to 3 decimal places — these are display percentages/ratios, not exact
-                // measurements, and full double precision (e.g. 83.11189368948767) is wasted
-                // wire bytes (docs/refactor/report-payload-size-reduction-design.md, F6).
-                case double d: writer.WriteNumberValue(Math.Round(d, 3)); break;
-                case float f: writer.WriteNumberValue(MathF.Round(f, 3)); break;
-                case short sh: writer.WriteNumberValue(sh); break;
-                default: JsonSerializer.Serialize(writer, cell, cell.GetType(), options); break;
-            }
-        }
+            CompactCellJson.Write(writer, cell, options);
         writer.WriteEndArray();
+    }
+}
+
+/// <summary>How one compact-table cell is written, shared by row-major <see cref="CompactRow"/>s and column-major <see cref="ColumnTable"/>s so both carry the same bytes for the same cell.</summary>
+internal static class CompactCellJson
+{
+    public static void Write(Utf8JsonWriter writer, object? cell, JsonSerializerOptions options)
+    {
+        switch (cell)
+        {
+            case null: writer.WriteNullValue(); break;
+            case string s: writer.WriteStringValue(s); break;
+            case bool b: writer.WriteBooleanValue(b); break;
+            case int i: writer.WriteNumberValue(i); break;
+            case long l: writer.WriteNumberValue(l); break;
+            case ulong ul: writer.WriteNumberValue(ul); break;
+            // Rounded to 3 decimal places — these are display percentages/ratios, not exact
+            // measurements, and full double precision (e.g. 83.11189368948767) is wasted
+            // wire bytes (docs/refactor/report-payload-size-reduction-design.md, F6).
+            case double d: writer.WriteNumberValue(Math.Round(d, 3)); break;
+            case float f: writer.WriteNumberValue(MathF.Round(f, 3)); break;
+            case short sh: writer.WriteNumberValue(sh); break;
+            default: JsonSerializer.Serialize(writer, cell, cell.GetType(), options); break;
+        }
     }
 }

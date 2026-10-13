@@ -42,6 +42,8 @@ A reader gets the verdict fast, and a large table is genuinely navigable. Three 
 | D6 | `entities`, `entitySummary`, `relations` (about 5.2 MB) | **Lazy segments.** They feed the dossier panel, so the core is verdict, claims and board |
 | D7 | Where rows become columns | **Option A now: a pure rows-to-columns converter at the serialization boundary** (a `ColumnTable` model; builders, `EntityCellPass`, `ReportStringPool` and the Markdown formatter untouched). **Option B deferred, not dropped: builders emit columns directly** (see [Deferred work](#deferred-work-do-not-drop)) |
 | D8 | Which output carries columns | **HTML payload first,** converter shared. `report.json` moves to columns later in M4 after its consumers are listed (see Deferred work); until then HTML and `report.json` differ in table shape, against § 13 rule 2 |
+| D9 | Section blocks (was open question 1) | **Every section's typed slots are lazy by default, no size threshold.** Measured 2026-10-14: narrative `blocks` are 14 KB, so they stay in `core`; the bulk is typed slots, 5.5 MB in two sections (A5 GC roots 3.5 MB: owned-subgraph groups; D4 event leaks 2.1 MB: instance cards, group cards, subscriber pool). Interpretation to confirm: "lazy by default" read as all typed slots, not only large ones |
+| D10 | Entity ids before their segment loads (was open question 2) | **No id-to-name index in `core`.** `entities` is one lazy segment, inflated before the first entity-bearing table is drawn or a dossier opens; `entitySummary` and `relations` load when a dossier opens. Core claims reach entities through `entitySummary.claimIds`, not the reverse. Verified 2026-10-14 by grep: header, panels, findings, nav and blocks renderers do not read the entity table; only entity cells in section tables (`report.renderers.shared.js`), the entity panel, and the table export in `report.ui.actions.js` do |
 
 ## Starting point (read from code 2026-10-13, then measured; see step 1)
 
@@ -74,7 +76,7 @@ A reader gets the verdict fast, and a large table is genuinely navigable. Three 
    - **Built (scratchpad only, not committed):** `build_spike.py` empties the finalizer table's rows from the step 1 payload and writes them as a column store (hex addresses as numbers, null cells as per-column reasons) in one gzip+base64 segment; `tpl.html` inflates the core, shows a one-line verdict, then lazy-inflates the segment and draws 50-row pages; `run_spike.mjs` drives it in headless Chrome; a second page holds the unsegmented payload.
    - **Finding, machinery is cheap:** the segment (68,576 rows, 4.6 MB inflated) inflates in about 23 ms and parses in 16 ms; first 50-row page 0.9 ms; jump to row 40,000 about 1 ms; sort of the full column 9-11 ms (typed-array index sort, main thread); a filter over the full column 1 ms (51,969 matches); DOM stays at 572 nodes.
    - **Finding, column-major layout is not smaller:** the string pool already turns `Type Name`, `Generation` and the Yes/No columns into integer indexes, so the table's rows gzip to 309 KB as shipped and the column store to 598 KB. Size comes from segmentation and lazy load, not from column-major encoding. Delta-encoding sorted numeric columns (the cache's v6 idiom) was not tested and is the lever to try if size matters.
-   - **Finding, tables alone do not reach the core budget:** unsegmented payload 20.35 MB; finalizer table out 16.1 MB (time to verdict about 257 ms vs 346 ms in this bare page); all 20 tables over 180 rows out an estimated 11.3 MB, against a § 16.2 target of 2 MB core and 8 MB total. The remainder is not tables: `domains` section blocks 5.9 MB (memory 3.5 MB, leaks 2.1 MB), `entitySummary` 2.4 MB, `entities` 2.3 MB, `relations` 0.5 MB. Hence D6 and open question 1.
+   - **Finding, tables alone do not reach the core budget:** unsegmented payload 20.35 MB; finalizer table out 16.1 MB (time to verdict about 257 ms vs 346 ms in this bare page); all 20 tables over 180 rows out an estimated 11.3 MB, against a § 16.2 target of 2 MB core and 8 MB total. The remainder is not tables: `domains` section blocks 5.9 MB (memory 3.5 MB, leaks 2.1 MB), `entitySummary` 2.4 MB, `entities` 2.3 MB, `relations` 0.5 MB. Hence D6 and D9.
    - **Caveats:** one table, one machine, warm cache; the page is a spike, so "verdict" is parse plus one heading and ignores real rendering.
 
 3. **Column store model.** *(converter and model built 2026-10-13; not wired into any output yet)* A column-major table type per [§ 14.2](ReportSystemVision.md#142-column-store), built by a converter (D7) and emitted in the HTML payload (D8).
@@ -87,10 +89,15 @@ A reader gets the verdict fast, and a large table is genuinely navigable. Three 
    - **Not done:** no JSON converter or `ReportJsonContext` entry for `ColumnTable`, no call site, and the viewer still reads rows, so the HTML payload is unchanged (wiring is step 4-6). Not run against the real 3.35 GB payload; the first real-data check should be that every one of the 138 tables converts without the over-wide-row exception and round-trips.
    - **Finding for later:** numeric-declared columns holding stray text cannot become typed arrays (D3, delta encoding) until those cells are fixed or moved out; a follow-up to list which builders emit them.
 
-4. **Segmenter.** *(pending)* Split the document into `core` plus lazy segments with a manifest of ids and sizes.
-   - **Segments:** large tables, entity data (D6), and section blocks (open question 1).
+4. **Segmenter.** *(built 2026-10-14 as a pure component; not wired, not run on real data)* Split the document into `core` plus lazy segments with a manifest of ids and sizes.
+   - **Segments:** large tables (over 180 rows, the viewer's lazy-hydration threshold; to confirm), every section's typed slots (D9), and entity data (D6, D10). Estimated `core` by subtraction: about 0.6 MB of 20.35 MB; not built.
    - **Boundary rule (§ 14.1):** everything a claim cites is in `core` or in a segment that claim names.
-   - **Entity ids:** claims and table cells must resolve an entity before its segment loads (open question 2).
+   - **Entity ids:** per D10, `entities` is inflated before the first entity-bearing table or dossier renders.
+   - **Built:** `ReportSegmenter.Segment` (`Reporting/Services/`) returns `SegmentedReport(Core, Segments)`; `ReportSegment`, `SectionSegmentPayload`, `EntityDossierPayload` (`Models/ReportSegment.cs`); `ColumnTableJsonConverter` (write-only); `CompactCellJson` extracted from `CompactRowJsonConverter` so a cell has the same bytes in a row and in a column; `SegmentId` on `AnalyzerDetailSection`, `RowCount` and `SegmentId` on `CompactTable` (null unless segmented, so `report.json` is unchanged). 13 tests in `Unit/Reporting/ReportSegmenterTests.cs`; 344 reporting-area tests pass.
+   - **Segments produced:** `s-<sectionId>` per section with any typed slot or table; `t-<sectionId>-<tableIndex>` per table over 180 rows (a `ColumnTable`, replaced by a stub with `RowCount` in its section segment); `e-entities`; `e-dossier` (summary and relations). A repeated id gets `~2`, `~3`. Sections with nothing lazy, and narrative blocks, stay in the core. Trend reports return unchanged (D4).
+   - **Not done:** no manifest yet (ids and sizes are on `ReportSegment`; the manifest is built by the encoder, step 5); nothing calls the segmenter, so the HTML is unchanged; the viewer cannot read segments (step 6). The sizes in this plan's estimates (core about 0.6 MB) are still arithmetic.
+   - **Real-data check not done:** a throwaway probe could not load the saved `report.json` back into the model, because `CompactRowJsonConverter.Read` rejects the `[id,"name"]` entity-cell arrays (an existing round-trip gap, not caused by this change). The check needs either the converter to read entity cells or a segmenter call in the HTML path during a CLI run (about 83 s on the reference dump).
+   - **Core still carries:** `strings` (the string pool), `domains[].domainInsights`, `crossDomainInsights`, executive summary and appendix; their size after segmentation is unmeasured.
 
 5. **Encoder.** *(pending)* Plain JSON below the existing threshold, gzip + base64 JSON arrays above it, per segment (D3). Determinism (§ 15): stable ordering, fixed float formatting, byte-identical output apart from timestamps.
 
@@ -115,10 +122,8 @@ A reader gets the verdict fast, and a large table is genuinely navigable. Three 
 
 ## Open questions
 
-1. **Section blocks.** `domains` blocks are 5.9 MB inflated even with tables out. Per-section segments, or part of `core`? Without moving them the core cannot approach 2 MB.
-2. **Entity id resolution.** A small id-to-name index in `core` with the rest lazy is one option; not designed yet.
-3. **Layer 2 caps.** Each stays for M4; whether any is removed is a later per-cap decision with its memory cost measured.
-4. **Delta encoding.** Whether delta-encoding sorted numeric columns shrinks the segments enough to matter (D3 defers binary columns until a measurement says so).
+1. **Layer 2 caps.** Each stays for M4; whether any is removed is a later per-cap decision with its memory cost measured.
+2. **Delta encoding.** Whether delta-encoding sorted numeric columns shrinks the segments enough to matter (D3 defers binary columns until a measurement says so).
 
 ## Constraints
 
@@ -134,6 +139,7 @@ A reader gets the verdict fast, and a large table is genuinely navigable. Three 
 
 ## Risks
 
+- **Search and filters over lazy content.** `report.ui.search.js` and the filter bar work on the rendered DOM, so text in a section or table that has not been opened is not searched. Needs a decision in step 6 (search the segments, or say what was not searched).
 - **Browser heap.** The ≤ 250 MB target after full drill-down is unmeasured as a process figure; step 9 owns it.
 - **Pre-render removal (D2)** can break a consumer we do not know of (email, SharePoint preview, PDF pipeline) that relied on its no-JS view.
 - **Markdown/text row counts.** Removing the caps changes what those formatters receive.

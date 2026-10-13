@@ -69,7 +69,9 @@ internal sealed record CompactTable(
     string Title,
     IReadOnlyList<CompactHeader> Headers,
     IReadOnlyList<CompactRow> Rows,
-    int RowLimit = 20);
+    int RowLimit = 20,
+    int? RowCount = null,
+    string? SegmentId = null);   // Set with RowCount when the rows ship as a lazy table segment and Rows is empty (ReportSegmenter)
 
 internal static class CompactTableExtensions
 {
@@ -261,7 +263,8 @@ internal sealed record AnalyzerDetailSection(
     IReadOnlyList<SubscriberDetailEntry>? SubscriberDetailPool = null,  // Pool referenced by EventLeakInstanceCards[].subscriberDetails indices (F4)
     IReadOnlyList<StackCluster>? StackClusters = null,           // Thread stack signature clusters
     IReadOnlyList<AnalyzerArtifact>? Artifacts = null,           // On-disk artifacts produced by the analyzer
-    IReadOnlyList<TreeWidget>? TreeWidgets = null);               // Shared collapsible tree widget data (e.g. cluster shared-prefix tree)
+    IReadOnlyList<TreeWidget>? TreeWidgets = null,                // Shared collapsible tree widget data (e.g. cluster shared-prefix tree)
+    string? SegmentId = null);                                    // Set when the section's body ships as a lazy segment; the typed slots above are then null (ReportSegmenter)
 
 // Discriminated union root — each subtype carries only what it needs
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]

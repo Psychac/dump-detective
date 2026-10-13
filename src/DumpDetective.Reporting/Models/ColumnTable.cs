@@ -23,4 +23,5 @@ internal sealed record ColumnTableColumn(
     ColumnStats? Stats);
 
 /// <summary>A table stored column by column, so a viewer can sort, filter and aggregate one column without touching the others.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(DumpDetective.Reporting.Serialization.ColumnTableJsonConverter))]
 internal sealed record ColumnTable(string Title, int RowCount, IReadOnlyList<ColumnTableColumn> Columns);

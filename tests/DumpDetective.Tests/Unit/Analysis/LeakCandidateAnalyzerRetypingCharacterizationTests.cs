@@ -218,6 +218,7 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         result.TopCandidates.Should().ContainSingle().Which.RootChain
             .Should().Be("StaticVar MyApp.Registry._instance -> MyApp.Cache@0x1000");
+        result.TopCandidates[0].RootChainSearch.Should().Be(RootChainSearch.Found);
     }
 
     [Fact]
@@ -232,6 +233,7 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
         LeakCandidateDomainResult result = await Analyze(typeStats, rootPaths: rootPaths);
 
         result.TopCandidates.Should().ContainSingle().Which.RootChain.Should().Be("StaticVar: MyApp.Registry@0x2000 -> MyApp.Cache@0x1000");
+        result.TopCandidates[0].RootChainSearch.Should().Be(RootChainSearch.Found);
     }
 
     [Fact]
@@ -243,6 +245,35 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
         LeakCandidateDomainResult result = await Analyze(typeStats);
 
         result.TopCandidates.Should().ContainSingle().Which.RootChain.Should().BeNull();
+        result.TopCandidates[0].RootChainSearch.Should().Be(RootChainSearch.Unreachable, "the search ran and concluded there is no path");
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_SearchHitsItsBound_IsTruncatedNotUnreachable()
+    {
+        var typeStats = new FakeHeapTypeStatisticsQuery();
+        typeStats.SetType("MyApp.Deep", instanceCount: 1, totalSize: 1000, gen2Count: 1, sampleAddress: 0x1000);
+
+        var rootPaths = new FakeHeapRootPathQuery();
+        rootPaths.SetTruncated(0x1000);
+
+        LeakCandidateDomainResult result = await Analyze(typeStats, rootPaths: rootPaths);
+
+        result.TopCandidates.Should().ContainSingle().Which.RootChain.Should().BeNull();
+        result.TopCandidates[0].RootChainSearch.Should().Be(RootChainSearch.SearchTruncated);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_CandidatesBeyondTheTopRankedAreNotSearched()
+    {
+        var typeStats = new FakeHeapTypeStatisticsQuery();
+        for (int i = 0; i < 25; i++)
+            typeStats.SetType($"MyApp.Type{i:D2}", instanceCount: 1, totalSize: (ulong)(1000 + i), gen2Count: 1, sampleAddress: (ulong)(0x1000 + i * 0x10));
+
+        LeakCandidateDomainResult result = await Analyze(typeStats);
+
+        result.TopCandidates.Count(c => c.RootChainSearch == RootChainSearch.Unreachable).Should().Be(20);
+        result.TopCandidates.Count(c => c.RootChainSearch == RootChainSearch.NotSearched).Should().Be(5);
     }
 
     private static async Task<LeakCandidateDomainResult> Analyze(
@@ -350,11 +381,15 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
     {
         private readonly Dictionary<ulong, string> _paths = new();
 
+        private readonly HashSet<ulong> _truncated = [];
+
         public void SetPath(ulong address, string formattedPath) => _paths[address] = formattedPath;
+
+        public void SetTruncated(ulong address) => _truncated.Add(address);
 
         public bool TryFindRootPath(ulong targetAddress, RootPathSearchOptions options, out string? formattedPath, out bool searchTruncated)
         {
-            searchTruncated = false;
+            searchTruncated = _truncated.Contains(targetAddress);
             return _paths.TryGetValue(targetAddress, out formattedPath);
         }
 

@@ -351,13 +351,20 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
                 string fieldSuffix = directRoot.FieldDescription is not null ? $" {directRoot.FieldDescription}" : string.Empty;
                 candidates[i] = candidate with
                 {
-                    RootChain = $"{directRoot.RootKind}{fieldSuffix} -> {FormatNodeByAddress(objectLookup, sampleAddress)}"
+                    RootChain = $"{directRoot.RootKind}{fieldSuffix} -> {FormatNodeByAddress(objectLookup, sampleAddress)}",
+                    RootChainSearch = RootChainSearch.Found,
                 };
                 continue;
             }
 
-            if (rootPaths.TryFindRootPath(sampleAddress, searchOptions, out string? formattedPath, out _) && formattedPath is not null)
-                candidates[i] = candidate with { RootChain = formattedPath };
+            bool found = rootPaths.TryFindRootPath(sampleAddress, searchOptions, out string? formattedPath, out bool searchTruncated)
+                && formattedPath is not null;
+
+            candidates[i] = candidate with
+            {
+                RootChain = found ? formattedPath : null,
+                RootChainSearch = found ? RootChainSearch.Found : (searchTruncated ? RootChainSearch.SearchTruncated : RootChainSearch.Unreachable),
+            };
         }
     }
 

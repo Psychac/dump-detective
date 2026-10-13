@@ -51,9 +51,26 @@ internal sealed record LeakCandidateRecord(
     /// candidates (see <c>LeakCandidateAnalyzer.RootChainTopN</c>) — cosmetic enrichment only;
     /// <see langword="null"/> means unattempted or unreachable within search bounds, not "not
     /// leaked". Unlike <see cref="LeakCandidateAssessment.RootKind"/> (a heuristic classification guess), this is a
-    /// verified chain when non-null.
+    /// verified chain when non-null. <see cref="RootChainSearch"/> says which of "unattempted", "unreachable" or "truncated" a null is.
     /// </summary>
-    string? RootChain = null);
+    string? RootChain = null,
+    /// <summary>What the root-chain search concluded for this candidate, so a null <see cref="RootChain"/> is never ambiguous.</summary>
+    RootChainSearch RootChainSearch = RootChainSearch.NotSearched);
+
+internal enum RootChainSearch
+{
+    /// <summary>Not attempted: beyond the top-scored candidates, or the type has no sample object to search from.</summary>
+    NotSearched,
+
+    /// <summary>A direct root hit or a path was found; <see cref="LeakCandidateRecord.RootChain"/> holds it.</summary>
+    Found,
+
+    /// <summary>Searched and confirmed unreachable within the search bounds.</summary>
+    Unreachable,
+
+    /// <summary>The search hit its bound before concluding either way.</summary>
+    SearchTruncated,
+}
 
 internal sealed record LeakCandidateDomainResult(
     int TotalCandidates,

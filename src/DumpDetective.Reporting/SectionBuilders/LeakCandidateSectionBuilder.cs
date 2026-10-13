@@ -91,15 +91,18 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
                     candidate.TypeName,
                     assessments[candidate].SuspicionScore,
                     assessments[candidate].Severity.ToString(),
-                    assessments[candidate].Classification.ToString(),
+                    // Unknown is the classifier's own "cannot decide": it looked at the signals and none matched.
+                    assessments[candidate].Classification == LeakClass.Unknown
+                        ? new UnknownCell(UnknownReason.Ambiguous)
+                        : assessments[candidate].Classification.ToString(),
                         candidate.TotalSize,
                     candidate.InstanceCount,
                         candidate.Gen2Pct,
-                    assessments[candidate].RootKind ?? "—",
+                    (object?)assessments[candidate].RootKind ?? new UnknownCell(UnknownReason.Ambiguous),
                     candidate.IsFinalizable ? "Yes" : "No",
                     candidate.IsContainer ? "Yes" : "No",
                         candidate.ReferenceFieldRatio,
-                    candidate.RootChain ?? "—"
+                    RootChainCell(candidate)
                 })).ToArray()));
 
             blocks.Add(T("Score factors: +30 for Gen2-heavy (>80%), +20 for >100 MB shallow size, +15 for finalizable types with >1,000 Gen2 objects, +10 each for static-rooted, pinned, and dependent-handle candidates, +5 for container-like types, +5 for reference-heavy shapes, and +5 for delegate/event-style types."));
@@ -212,4 +215,13 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
 
         return unitIndex == 0 ? $"{value:N0} B" : $"{bytes:F1} {units[unitIndex]}";
     }
+
+    // A found chain is its text. Confirmed unreachable is a measured result. A truncated search could not decide. Not searched was not measured.
+    private static object RootChainCell(LeakCandidateRecord candidate) => candidate.RootChainSearch switch
+    {
+        RootChainSearch.Found => candidate.RootChain!,
+        RootChainSearch.Unreachable => "No root path",
+        RootChainSearch.SearchTruncated => new UnknownCell(UnknownReason.Ambiguous),
+        _ => new UnknownCell(UnknownReason.NotMeasured),
+    };
 }

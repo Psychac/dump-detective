@@ -9,7 +9,7 @@ import { resolveStr } from './report.renderers.shared.js';
 import { isEntityColumn, resolveEntityCell, describeEntityCell } from './report.renderers.shared.js';
 import { decorateEntityCell } from './report.renderers.entities.js';
 import { confidenceSlots } from './report.renderers.shared.js';
-import { loadSectionSegment } from './report.segments.js';
+import { loadSectionSegment, loadEntities } from './report.segments.js';
 import { attachPagedTable } from './report.ui.tables.js';
 
 // Resolves pooled-string cells (see report.renderers.shared.js) back to their literal value.
@@ -513,6 +513,9 @@ export function buildAnalyzerSection(section, i) {
               tableEl.__applyManagedState();
             }
           }
+
+          // A large table attaches its data when opened; a search over the report asks for it earlier, which only builds one page of rows.
+          tableEl.__hydrateRows = hydrateRows;
 
           if (shouldLazyHydrate && !tblDetails.open) {
             const hint = el('div', 'table-lazy-hint');
@@ -1084,18 +1087,20 @@ function buildTableCell(cellData, columnLabel, meta) {
 // A section whose body ships as a lazy segment loads it the first time the section is opened, then builds the body. A URL hash into the
 // section opens it, which loads it the same way ; once the body is built the page is told (dumpdetective:section-body-rendered), so a link to something inside it can be followed.
 function attachLazySectionBody(section, details, content, wrapper, renderBody) {
-  let started = false;
-  async function load() {
-    if (started) return;
-    started = true;
+  wrapper.dataset.lazyBody = 'pending';
+  let loading = null;
+
+  async function run() {
     const status = el('div', 'lazy-section__status');
     status.setAttribute('role', 'status');
     status.textContent = 'Loading section details\u2026';
     content.appendChild(status);
     try {
       await loadSectionSegment(section);
+      if (sectionHasEntityColumns(section)) await loadEntities();
       status.remove();
       renderBody();
+      wrapper.dataset.lazyBody = 'loaded';
       document.dispatchEvent(new CustomEvent('dumpdetective:section-body-rendered', { detail: { wrapper: wrapper } }));
     } catch (err) {
       status.classList.add('lazy-section__status--error');
@@ -1103,6 +1108,13 @@ function attachLazySectionBody(section, details, content, wrapper, renderBody) {
       status.textContent = err && err.message ? err.message : String(err);
     }
   }
+
+  // One load per section, whoever asks first (opening it, or a search over everything); it never rejects, a failure is shown in the section.
+  function load() {
+    if (!loading) loading = run();
+    return loading;
+  }
+  wrapper.__loadBody = load;
 
   if (details.open) { load(); return; }
   details.addEventListener('toggle', function onToggle() {
@@ -1112,6 +1124,13 @@ function attachLazySectionBody(section, details, content, wrapper, renderBody) {
   });
 }
 
+// A table whose cells name entities needs the entity table before its rows are built.
+function sectionHasEntityColumns(section) {
+  const tables = Array.isArray(section.compactTables) ? section.compactTables : [];
+  return tables.some(function (table) {
+    return Array.isArray(table.headers) && table.headers.some(function (h) { return h && typeof h.type === 'string' && h.type.startsWith('entity:'); });
+  });
+}
 
 // ── T3b Correlation Timeline lane ─────────────────────────────────────────────
 

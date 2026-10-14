@@ -87,8 +87,15 @@ function parseEntityHash(hash) {
   }
 }
 
+// When the entity data ships as lazy segments these load it; the panel and its links cannot exist before it, so a dossier waits for them.
+let _loadDossierData = null;
+let _entityOpenToken = 0;
+export function setEntityLoaders(loadEntities, loadDossier) {
+  _loadDossierData = loadDossier;
+}
+
 export function setupEntityPanel() {
-  if (!_entityTable) return;
+  if (!_entityTable && !_loadDossierData) return;
   window.addEventListener('hashchange', syncEntityPanelToHash);
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && _entityPanelEl && !_entityPanelEl.hidden) closeEntityPanel(true);
@@ -146,21 +153,37 @@ function ensureEntityPanel() {
   return panel;
 }
 
-function openEntityPanel(target) {
+async function openEntityPanel(target) {
+  const token = ++_entityOpenToken;
   const panel = ensureEntityPanel();
   const parts = panel._parts;
-  const entity = _entityByKey.get(entityKey(target.kind, target.joinKey));
   parts.kind.textContent = target.kind;
   parts.title.textContent = entityPageTitle(target);
   parts.body.textContent = '';
+  panel.hidden = false;
+  parts.close.focus();
+
+  if (_loadDossierData) {
+    parts.body.appendChild(entityNote('Loading\u2026'));
+    try {
+      await _loadDossierData();
+    } catch (err) {
+      if (token !== _entityOpenToken) return;
+      parts.body.textContent = '';
+      parts.body.appendChild(entityNote(err && err.message ? err.message : String(err)));
+      return;
+    }
+    if (token !== _entityOpenToken) return;
+    parts.body.textContent = '';
+  }
+
+  const entity = _entityByKey.get(entityKey(target.kind, target.joinKey));
   if (entity) {
     renderEntityBody(parts.body, entity);
   } else {
     parts.body.appendChild(entityNote('This report has no entry for that ' + target.kind + '. The link may come from a different report or run.'));
   }
-  panel.hidden = false;
   parts.body.scrollTop = 0;
-  parts.close.focus();
 }
 
 // An object's key carries the dump it came from ("<dump path>:0x..."); the page is about the address, so that is the title.

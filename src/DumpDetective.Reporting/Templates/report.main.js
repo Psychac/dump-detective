@@ -1,7 +1,7 @@
 import * as Dom from './report.dom.js';
 import * as R from './report.renderers.js';
 import * as UI from './report.ui.js';
-import { decodeElementText, rehydrateSegments } from './report.segments.js';
+import { decodeElementText, configureEntityLoading, hasLazyEntities, loadEntities, loadDossier } from './report.segments.js';
 
 async function loadPayload() {
   try {
@@ -53,10 +53,14 @@ async function bootstrap() {
   const payload = await loadPayload();
   if (!payload || !payload.doc) return;
   const doc = payload.doc;
-  await rehydrateSegments(doc);
   R.setStringPool(doc.strings);
-  R.setEntities(doc.entities);
-  R.setEntityData(doc);
+  if (hasLazyEntities()) {
+    configureEntityLoading(doc, function (d) { R.setEntities(d.entities); R.setEntityData(d); });
+    R.setEntityLoaders(loadEntities, loadDossier);
+  } else {
+    R.setEntities(doc.entities);
+    R.setEntityData(doc);
+  }
   if ((!doc.perDumpDocs || !doc.perDumpDocs.length) && Array.isArray(payload.perDumpDocs) && payload.perDumpDocs.length) {
     doc.perDumpDocs = payload.perDumpDocs;
   }

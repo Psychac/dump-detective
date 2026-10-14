@@ -991,6 +991,13 @@ export function buildGlobalSearchBar(doc) {
   clear.textContent = 'Clear';
   clear.setAttribute('aria-label', 'Clear report search');
   bar.appendChild(clear);
+  const searchAll = el('button', 'action-btn global-search-all');
+  searchAll.type = 'button';
+  searchAll.id = 'global-search-all';
+  searchAll.textContent = 'Search everything';
+  searchAll.title = 'Open every section in the background so the search covers all of them';
+  searchAll.setAttribute('aria-label', 'Load every section and search all of it');
+  bar.appendChild(searchAll);
 
   const count = el('span', 'filter-count global-search-count');
   count.id = 'global-search-count';

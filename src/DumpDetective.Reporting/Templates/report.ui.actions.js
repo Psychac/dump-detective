@@ -52,6 +52,7 @@ export function setupExportActions(announce) {
   if (btnJson) btnJson.addEventListener('click', async function () {
     try {
       await loadAllSections(window.__REPORT__ && (window.__REPORT__.report || window.__REPORT__));
+      await loadDossier();
       // window.__REPORT__ is the whole document: the embedded core with its lazy segments put back.
       let payload = window.__REPORT__ || null;
       payload = resolveStringPoolForDownload(payload);
@@ -65,6 +66,7 @@ export function setupExportActions(announce) {
   if (btnCsv) btnCsv.addEventListener('click', async function () {
     try {
       await loadAllSections(window.__REPORT__ && (window.__REPORT__.report || window.__REPORT__));
+      await loadDossier();
       const payload = window.__REPORT__ || null;
       const report =(payload && payload.report) ? payload.report : payload;
       // The embedded document carries findings per domain and across domains; report.findings (the flat list) is not serialized.

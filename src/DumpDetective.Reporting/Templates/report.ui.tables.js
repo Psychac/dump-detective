@@ -131,6 +131,14 @@ function pagedSearchText(paged) {
   return paged.searchText;
 }
 
+// Whether any row of a large table contains the text, for a search that the page on screen cannot answer.
+export function pagedTableMatches(tbl, query) {
+  if (!tbl.__paged) return false;
+  const searchText = pagedSearchText(tbl.__paged);
+  for (let i = 0; i < searchText.length; i++) if (searchText[i].includes(query)) return true;
+  return false;
+}
+
 function applyPagedTableState(tbl) {
   const paged = tbl.__paged;
   const pageSizeRaw = tbl.dataset.pageSize || '20';

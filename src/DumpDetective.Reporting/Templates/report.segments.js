@@ -93,19 +93,52 @@ export async function loadAllSections(doc) {
   await Promise.all(sections.map(loadSectionSegment));
 }
 
-// The entity table and the dossier data are still loaded up front; slice 4 of step 6 makes them lazy too.
-export async function rehydrateSegments(doc) {
-  const manifest = readSegmentManifest();
-  if (!doc || !manifest.length) return;
-  const entityEntries = manifest.filter(function (entry) { return entry.kind === 'entities' || entry.kind === 'dossier'; });
-  const loaded = await Promise.all(entityEntries.map(function (entry) { return loadSegment(entry.id); }));
-  entityEntries.forEach(function (entry, i) {
-    const payload = loaded[i];
-    if (!payload) return;
-    if (entry.kind === 'entities') doc.entities = payload;
-    else {
-      if (payload.entitySummary) doc.entitySummary = payload.entitySummary;
-      if (payload.relations) doc.relations = payload.relations;
-    }
-  });
+// Entity data is lazy (m4-payload-plan.md, D10): the entity table loads before the first table with entity cells is built, and the dossier data
+// (summary and relations) when a dossier first opens. `apply` hands the document to the viewer's entity code each time something arrives.
+let _entityDoc = null;
+let _applyEntityData = null;
+let _entitiesLoad = null;
+let _dossierLoad = null;
+
+export function configureEntityLoading(doc, apply) {
+  _entityDoc = doc;
+  _applyEntityData = apply;
+}
+
+function manifestEntry(kind) {
+  return readSegmentManifest().find(function (entry) { return entry.kind === kind; }) || null;
+}
+
+export function loadEntities() {
+  if (!_entityDoc) return Promise.resolve();
+  if (!_entitiesLoad) {
+    _entitiesLoad = (async function () {
+      const entry = manifestEntry('entities');
+      if (!entry || _entityDoc.entities) return;
+      _entityDoc.entities = await loadSegment(entry.id);
+      _applyEntityData(_entityDoc);
+    })();
+  }
+  return _entitiesLoad;
+}
+
+// The dossier needs the entity table too, so this loads both.
+export function loadDossier() {
+  if (!_entityDoc) return Promise.resolve();
+  if (!_dossierLoad) {
+    _dossierLoad = (async function () {
+      await loadEntities();
+      const entry = manifestEntry('dossier');
+      if (!entry) return;
+      const payload = await loadSegment(entry.id);
+      if (payload && payload.entitySummary) _entityDoc.entitySummary = payload.entitySummary;
+      if (payload && payload.relations) _entityDoc.relations = payload.relations;
+      _applyEntityData(_entityDoc);
+    })();
+  }
+  return _dossierLoad;
+}
+
+export function hasLazyEntities() {
+  return !!manifestEntry('entities');
 }

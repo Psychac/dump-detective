@@ -1459,3 +1459,6 @@ body.high-contrast .filter-btn.active { background: #fff !important; color: #000
 .artifact-list__filename { font-size: 12px; font-weight: 600; color: #1e293b; font-family: ui-monospace, 'Cascadia Code', monospace; word-break: break-all; }
 .artifact-list__instructions { font-size: 11px; color: #64748b; }
 
+
+.lazy-section__status { padding: 0.5rem 0; color: var(--text-muted, #666); font-style: italic; }
+.lazy-section__status--error { color: #b00020; font-style: normal; }

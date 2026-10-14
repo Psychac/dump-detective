@@ -67,36 +67,45 @@ function columnCell(col, row) {
   return reason ? { u: NULL_REASON_CODES[reason] || 'nm' } : null;
 }
 
-// Loads every segment and puts its content back where it came from, so the rest of the viewer sees the whole document.
-// Later steps replace this eager pass with loading on demand.
+// Puts a section's lazy content back into the section object: its typed slots from the section segment, and the rows of each large table from
+// its table segment. Idempotent, so an open and an export can race.
+export async function loadSectionSegment(section) {
+  if (!section || !section.segmentId) return;
+  const payload = await loadSegment(section.segmentId);
+  if (payload) Object.keys(payload).forEach(function (key) { section[key] = payload[key]; });
+
+  const stubs = (Array.isArray(section.compactTables) ? section.compactTables : []).filter(function (table) { return table.segmentId; });
+  const columnTables = await Promise.all(stubs.map(function (table) { return loadSegment(table.segmentId); }));
+  stubs.forEach(function (table, i) {
+    table.rows = columnTableToRows(columnTables[i]);
+    delete table.segmentId;
+    delete table.rowCount;
+  });
+  delete section.segmentId;
+}
+
+// Every section of the document, for the downloads, which need the whole report.
+export async function loadAllSections(doc) {
+  const sections = [];
+  (Array.isArray(doc && doc.domains) ? doc.domains : []).forEach(function (domain) {
+    (Array.isArray(domain.sections) ? domain.sections : []).forEach(function (section) { sections.push(section); });
+  });
+  await Promise.all(sections.map(loadSectionSegment));
+}
+
+// The entity table and the dossier data are still loaded up front; slice 4 of step 6 makes them lazy too.
 export async function rehydrateSegments(doc) {
   const manifest = readSegmentManifest();
   if (!doc || !manifest.length) return;
-  const loaded = await Promise.all(manifest.map(function (entry) { return loadSegment(entry.id); }));
-  const byId = new Map();
-  manifest.forEach(function (entry, i) { byId.set(entry.id, loaded[i]); });
-
-  manifest.forEach(function (entry) {
-    const payload = byId.get(entry.id);
+  const entityEntries = manifest.filter(function (entry) { return entry.kind === 'entities' || entry.kind === 'dossier'; });
+  const loaded = await Promise.all(entityEntries.map(function (entry) { return loadSegment(entry.id); }));
+  entityEntries.forEach(function (entry, i) {
+    const payload = loaded[i];
     if (!payload) return;
     if (entry.kind === 'entities') doc.entities = payload;
-    else if (entry.kind === 'dossier') {
+    else {
       if (payload.entitySummary) doc.entitySummary = payload.entitySummary;
       if (payload.relations) doc.relations = payload.relations;
     }
-  });
-
-  (Array.isArray(doc.domains) ? doc.domains : []).forEach(function (domain) {
-    (Array.isArray(domain.sections) ? domain.sections : []).forEach(function (section) {
-      if (!section.segmentId) return;
-      const payload = byId.get(section.segmentId);
-      if (payload) Object.keys(payload).forEach(function (key) { section[key] = payload[key]; });
-      (Array.isArray(section.compactTables) ? section.compactTables : []).forEach(function (table) {
-        if (!table.segmentId) return;
-        table.rows = columnTableToRows(byId.get(table.segmentId));
-        delete table.segmentId;
-        delete table.rowCount;
-      });
-    });
   });
 }

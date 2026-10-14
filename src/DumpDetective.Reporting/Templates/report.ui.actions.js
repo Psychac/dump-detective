@@ -49,8 +49,9 @@ function resolveStringPoolForDownload(payload) {
 
 export function setupExportActions(announce) {
   const btnJson = document.getElementById('btn-download-json');
-  if (btnJson) btnJson.addEventListener('click', function () {
+  if (btnJson) btnJson.addEventListener('click', async function () {
     try {
+      await loadAllSections(window.__REPORT__ && (window.__REPORT__.report || window.__REPORT__));
       // window.__REPORT__ is the whole document: the embedded core with its lazy segments put back.
       let payload = window.__REPORT__ || null;
       payload = resolveStringPoolForDownload(payload);
@@ -61,8 +62,9 @@ export function setupExportActions(announce) {
   });
 
   const btnCsv = document.getElementById('btn-export-csv');
-  if (btnCsv) btnCsv.addEventListener('click', function () {
+  if (btnCsv) btnCsv.addEventListener('click', async function () {
     try {
+      await loadAllSections(window.__REPORT__ && (window.__REPORT__.report || window.__REPORT__));
       const payload = window.__REPORT__ || null;
       const report =(payload && payload.report) ? payload.report : payload;
       const findings = (report && Array.isArray(report.findings)) ? report.findings : [];

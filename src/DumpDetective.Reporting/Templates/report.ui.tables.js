@@ -132,6 +132,51 @@ function pagedSearchText(paged) {
 }
 
 // Whether any row of a large table contains the text, for a search that the page on screen cannot answer.
+// The rows an export covers: every row matching the table's filter, in its current order, as cell text, not just the page on screen.
+function matchedRowsAsText(tbl) {
+  const input = document.querySelector('.table-filter-input[data-target-table="' + tbl.id + '"]');
+  const query = input ? input.value.trim().toLowerCase() : '';
+  const out = [];
+  if (tbl.__paged) {
+    const paged = tbl.__paged, model = paged.model;
+    const searchText = query ? pagedSearchText(paged) : null;
+    const order = pagedOrder(paged);
+    for (let i = 0; i < order.length; i++) {
+      if (searchText && !searchText[order[i]].includes(query)) continue;
+      const row = model.rows[order[i]];
+      const cells = Array.isArray(row) ? row : (row && Array.isArray(row.cells) ? row.cells : []);
+      out.push(cells.map(function (cell, c) { return model.cellText(cell, model.headerMeta[c] || null); }));
+    }
+    return out;
+  }
+  tbl.querySelectorAll('tbody tr').forEach(function (tr) {
+    if (query && !(tr.textContent || '').toLowerCase().includes(query)) return;
+    out.push(Array.from(tr.cells).map(function (td) { return td.textContent || ''; }));
+  });
+  return out;
+}
+
+// Cells are text a person or a dump chose, so one that a spreadsheet would read as a formula is written as text.
+function csvCell(text) {
+  let value = String(text == null ? '' : text);
+  if (/^[=@\t\r]/.test(value) || /^[+-](?![\d.])/.test(value)) value = "'" + value;
+  return '"' + value.replace(/"/g, '""') + '"';
+}
+
+function exportTableCsv(tbl, title) {
+  const headers = Array.from(tbl.querySelectorAll('thead th')).map(function (th) { return th.textContent || ''; });
+  const lines = [headers.map(csvCell).join(',')];
+  const rows = matchedRowsAsText(tbl);
+  for (let i = 0; i < rows.length; i++) lines.push(rows[i].map(csvCell).join(','));
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (title || 'table').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  return rows.length;
+}
+
 export function pagedTableMatches(tbl, query) {
   if (!tbl.__paged) return false;
   const searchText = pagedSearchText(tbl.__paged);
@@ -310,6 +355,13 @@ export function setupDetailTables() {
   });
 
   document.addEventListener('click', function (e) {
+    const exportHit = tableFor(e.target, '.table-export-csv[data-target-table]');
+    if (exportHit) {
+      // A large table that was never opened has no data attached yet.
+      if (typeof exportHit.tbl.__hydrateRows === 'function' && exportHit.tbl.dataset.hydrated !== '1') exportHit.tbl.__hydrateRows();
+      exportTableCsv(exportHit.tbl, exportHit.control.getAttribute('data-title'));
+      return;
+    }
     const prev = tableFor(e.target, '.table-page-prev-btn[data-target-table]');
     if (prev) {
       prev.tbl.dataset.page = String(Math.max(1, Number(prev.tbl.dataset.page || '1') - 1));

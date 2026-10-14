@@ -381,7 +381,7 @@ export function buildAnalyzerSection(section, i) {
         tblDetails.setAttribute('data-collapsible', 'table');
         const tblSummary = el('summary', 'table-collapse__summary');
         const limit = tbl.rowLimit || 20;
-        tblSummary.textContent = (tbl.title || 'Table') + ' \u2014 ' + rowCount + ' row' + (rowCount !== 1 ? 's' : '');
+        tblSummary.textContent = honestTableTitle(tbl.title || 'Table', rowCount) + ' \u2014 ' + rowCount + ' row' + (rowCount !== 1 ? 's' : '');
         tblDetails.appendChild(tblSummary);
         if (tbl.headers && tbl.headers.length) {
           const tableId = 'detail-table-' + sectionIndexKey + '-' + ti;
@@ -399,6 +399,14 @@ export function buildAnalyzerSection(section, i) {
           count.setAttribute('data-target-table-count', tableId);
           count.textContent = rowCount + ' rows';
           tools.appendChild(count);
+
+          const exportBtn = el('button', 'action-btn table-export-csv');
+          exportBtn.type = 'button';
+          exportBtn.setAttribute('data-target-table', tableId);
+          exportBtn.setAttribute('data-title', tbl.title || 'table');
+          exportBtn.textContent = 'CSV';
+          exportBtn.title = 'Download every row of this table matching the filter, in the current order, as shown';
+          tools.appendChild(exportBtn);
 
           const pageSizeOptions = [10, 20, 50, 100, 'all'];
           if (rowCount > pageSizeOptions[0]) {
@@ -1037,6 +1045,15 @@ export function buildAnalyzerSection(section, i) {
   }
 
   return wrapper;
+}
+
+// A table whose title says "Top ..." but which shipped far more rows than any top-N list does should not claim to be one. A table over the lazy-row
+// threshold (the same 180 rows the viewer pages from data) loses the word; the analyzer-side caps found in the 2026-10-13 audit are all below it, so
+// a capped list keeps its "Top". The row count beside the title states how many rows there are either way.
+function honestTableTitle(title, rowCount) {
+  if (rowCount <= 180 || !/^Top\s+\S/.test(title)) return title;
+  const rest = title.replace(/^Top\s+/, '');
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
 // What a table cell shows and sorts by. A numeric column shows its value compactly (bytes, percent); anything else shows its text.

@@ -10,6 +10,7 @@ import { isEntityColumn, resolveEntityCell, describeEntityCell } from './report.
 import { decorateEntityCell } from './report.renderers.entities.js';
 import { confidenceSlots } from './report.renderers.shared.js';
 import { loadSectionSegment } from './report.segments.js';
+import { attachPagedTable } from './report.ui.tables.js';
 
 // Resolves pooled-string cells (see report.renderers.shared.js) back to their literal value.
 // Only non-numeric columns can contain pooled indices — the producer never pools a cell in a
@@ -473,56 +474,37 @@ export function buildAnalyzerSection(section, i) {
           tableEl._headerMeta = tbl.headerMeta || null;
           const allRows = tbl.rows || [];
 
+          const buildRow = function (dataRow, ri) {
+            const tr = document.createElement('tr');
+            tr.dataset.rowIndex = String(ri);
+            const cells = Array.isArray(dataRow)
+              ? dataRow
+              : (dataRow && Array.isArray(dataRow.cells) ? dataRow.cells : []);
+            for (let ci = 0; ci < cells.length; ci++) {
+              const meta = tableEl._headerMeta && tableEl._headerMeta[ci] ? tableEl._headerMeta[ci] : null;
+              tr.appendChild(buildTableCell(cells[ci], String(tbl.headers[ci] || ('Column ' + (ci + 1))), meta));
+            }
+            return tr;
+          };
+
           function hydrateRows() {
             if (tableEl.dataset.hydrated === '1') return;
+            if (shouldLazyHydrate) {
+              // A large table keeps its rows as data and draws one page at a time, so the DOM never holds the other rows
+              // (docs/ReportStructure/m4-payload-plan.md, D1a); sort and filter work over the data, not the page.
+              attachPagedTable(tableEl, tbody, {
+                rows: allRows,
+                headerMeta: tableEl._headerMeta || [],
+                buildRow: buildRow,
+                cellText: cellDisplayText,
+                sortValue: cellSortValue,
+              });
+              tableEl.dataset.hydrated = '1';
+              return;
+            }
             for (let ri = 0; ri < allRows.length; ri++) {
-              const dataRow = allRows[ri]; const tr = document.createElement('tr');
-              tr.dataset.rowIndex = String(ri);
-              const cells = Array.isArray(dataRow)
-                ? dataRow
-                : (dataRow && Array.isArray(dataRow.cells) ? dataRow.cells : []);
-              for (let ci = 0; ci < cells.length; ci++) {
-                  const td = document.createElement('td');
-                  const cellData = cells[ci];
-                  td.dataset.colLabel = String(tbl.headers[ci] || ('Column ' + (ci + 1)));
-
-                  // Best-effort: compute numeric value for sorting/filtering and
-                  // normalize display for bytes-typed columns.
-                  try {
-                    const meta = tableEl._headerMeta && tableEl._headerMeta[ci] ? tableEl._headerMeta[ci] : null;
-                    let numeric = null;
-                    // extract raw display first
-                    let display = extractCellDisplay(cellData);
-                    if (meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format)) {
-                      if (typeof cellData === 'number') numeric = cellData;
-                      else if (cellData && typeof cellData === 'object' && Number.isFinite(Number(cellData.rawValue))) numeric = Number(cellData.rawValue);
-                      else if (typeof cellData === 'string' && Number.isFinite(Number(String(cellData).replace(/,/g, '').replace(/%$/g, '')))) {
-                        numeric = Number(String(cellData).replace(/,/g, '').replace(/%$/g, ''));
-                      }
-
-                      if (numeric != null && Number.isFinite(Number(numeric))) {
-                        td.dataset.value = String(Number(numeric));
-                        td.textContent = formatCompactNumericValue(Number(numeric), meta);
-                      } else {
-                        td.textContent = display;
-                      }
-                    } else {
-                      td.textContent = display;
-                    }
-                  } catch (e) {
-                    td.textContent = extractCellDisplay(cellData);
-                  }
-                  if (cellData && cellData.entityId != null) decorateEntityCell(td, cellData.entityId, td.textContent);
-                  const unknown = unknownCell(cellData);
-                  if (unknown) {
-                    td.classList.add('cell-unknown', 'cell-unknown--' + cellData.u);
-                    td.title = unknown.label;
-                  }
-                tr.appendChild(td);
-              }
-              if (limit > 0 && rowCount > limit && ri >= limit) {
-                tr.hidden = true;
-              }
+              const tr = buildRow(allRows[ri], ri);
+              if (limit > 0 && rowCount > limit && ri >= limit) tr.hidden = true;
               tbody.appendChild(tr);
             }
 
@@ -1052,6 +1034,51 @@ export function buildAnalyzerSection(section, i) {
   }
 
   return wrapper;
+}
+
+// What a table cell shows and sorts by. A numeric column shows its value compactly (bytes, percent); anything else shows its text.
+function computeCell(cellData, meta) {
+  const display = extractCellDisplay(cellData);
+  try {
+    let numeric = null;
+    if (meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format)) {
+      if (typeof cellData === 'number') numeric = cellData;
+      else if (cellData && typeof cellData === 'object' && Number.isFinite(Number(cellData.rawValue))) numeric = Number(cellData.rawValue);
+      else if (typeof cellData === 'string' && Number.isFinite(Number(String(cellData).replace(/,/g, '').replace(/%$/g, '')))) {
+        numeric = Number(String(cellData).replace(/,/g, '').replace(/%$/g, ''));
+      }
+    }
+    if (numeric != null && Number.isFinite(Number(numeric))) {
+      return { text: formatCompactNumericValue(Number(numeric), meta), numeric: Number(numeric) };
+    }
+  } catch (e) { /* fall through to the plain text */ }
+  return { text: display, numeric: null };
+}
+
+function cellDisplayText(cellData, meta) {
+  return computeCell(cellData, meta).text;
+}
+
+// A sort key: a number for a numeric cell, lower-cased text otherwise, null for a cell with no value (sorted last).
+function cellSortValue(cellData, meta) {
+  if (unknownCell(cellData)) return null;
+  const cell = computeCell(cellData, meta);
+  return cell.numeric != null ? cell.numeric : cell.text.toLowerCase();
+}
+
+function buildTableCell(cellData, columnLabel, meta) {
+  const td = document.createElement('td');
+  td.dataset.colLabel = columnLabel;
+  const cell = computeCell(cellData, meta);
+  if (cell.numeric != null) td.dataset.value = String(cell.numeric);
+  td.textContent = cell.text;
+  if (cellData && cellData.entityId != null) decorateEntityCell(td, cellData.entityId, td.textContent);
+  const unknown = unknownCell(cellData);
+  if (unknown) {
+    td.classList.add('cell-unknown', 'cell-unknown--' + cellData.u);
+    td.title = unknown.label;
+  }
+  return td;
 }
 
 // A section whose body ships as a lazy segment loads it the first time the section is opened, then builds the body. A URL hash into the

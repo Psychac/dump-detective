@@ -38,6 +38,7 @@ function applyTableCellClamp(scope) {
 
 function applyManagedTableState(tbl) {
   if (!tbl) return;
+  if (tbl.__paged) { applyPagedTableState(tbl); return; }
   const pageSizeRaw = tbl.dataset.pageSize || '20';
   const pageSize = pageSizeRaw === 'all' ? 0 : Number(pageSizeRaw);
   const input = document.querySelector('.table-filter-input[data-target-table="' + tbl.id + '"]');
@@ -54,28 +55,36 @@ function applyManagedTableState(tbl) {
     }
   }
 
-  const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(matchedRows.length / pageSize)) : 1;
+  const window_ = pageWindow(tbl, matchedRows.length, pageSize);
+  for (let i = 0; i < matchedRows.length; i++) {
+    matchedRows[i].hidden = !(i >= window_.start && i < window_.end);
+  }
+  updatePagerUi(tbl, matchedRows.length, window_, query, pageSizeRaw);
+  applyTableCellClamp(tbl);
+}
+
+// The page a table is on and the row range it shows, with the page clamped to the pages that exist.
+function pageWindow(tbl, matchedCount, pageSize) {
+  const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(matchedCount / pageSize)) : 1;
   let page = Number(tbl.dataset.page || '1');
   if (!Number.isFinite(page) || page < 1) page = 1;
   if (page > totalPages) page = totalPages;
   tbl.dataset.page = String(page);
-
   const start = pageSize > 0 ? (page - 1) * pageSize : 0;
-  const end = pageSize > 0 ? start + pageSize : matchedRows.length;
-  for (let i = 0; i < matchedRows.length; i++) {
-    matchedRows[i].hidden = !(i >= start && i < end);
-  }
-  const visible = Math.max(0, Math.min(end, matchedRows.length) - start);
+  const end = pageSize > 0 ? start + pageSize : matchedCount;
+  return { page: page, totalPages: totalPages, start: start, end: end };
+}
 
+function updatePagerUi(tbl, matchedCount, window_, query, pageSizeRaw) {
   const count = document.querySelector('[data-target-table-count="' + tbl.id + '"]');
   if (count) {
-    if (matchedRows.length === 0) {
+    if (matchedCount === 0) {
       count.textContent = query ? '0 matching rows' : '0 rows';
     } else {
-      const rangeText = (start + 1) + '–' + Math.min(end, matchedRows.length);
+      const rangeText = (window_.start + 1) + '–' + Math.min(window_.end, matchedCount);
       count.textContent = query
-        ? (rangeText + ' of ' + matchedRows.length + ' matching rows')
-        : (rangeText + ' of ' + matchedRows.length + ' rows');
+        ? (rangeText + ' of ' + matchedCount + ' matching rows')
+        : (rangeText + ' of ' + matchedCount + ' rows');
     }
   }
 
@@ -83,19 +92,103 @@ function applyManagedTableState(tbl) {
   if (sizeSelect && sizeSelect.value !== pageSizeRaw) sizeSelect.value = pageSizeRaw;
 
   const indicator = document.querySelector('[data-target-table-page="' + tbl.id + '"]');
-  if (indicator) indicator.textContent = 'Page ' + page + ' of ' + totalPages;
+  if (indicator) indicator.textContent = 'Page ' + window_.page + ' of ' + window_.totalPages;
 
   const prevBtn = document.querySelector('.table-page-prev-btn[data-target-table="' + tbl.id + '"]');
-  if (prevBtn) prevBtn.disabled = page <= 1;
+  if (prevBtn) prevBtn.disabled = window_.page <= 1;
 
   const nextBtn = document.querySelector('.table-page-next-btn[data-target-table="' + tbl.id + '"]');
-  if (nextBtn) nextBtn.disabled = page >= totalPages;
+  if (nextBtn) nextBtn.disabled = window_.page >= window_.totalPages;
+}
 
+// A large table (m4-payload-plan.md, D1a): its rows stay as data in `model.rows`, `order` is their current sort order and the DOM holds only the
+// page on screen. Filtering matches the same text a row would show, built once on first use.
+export function attachPagedTable(tableEl, tbody, model) {
+  tableEl.__paged = { model: model, tbody: tbody, order: null, searchText: null };
+  tableEl.__applyManagedState = function () { applyManagedTableState(tableEl); };
+  tableEl.__applyManagedState();
+}
+
+function pagedOrder(paged) {
+  if (!paged.order) {
+    const rows = paged.model.rows;
+    paged.order = new Array(rows.length);
+    for (let i = 0; i < rows.length; i++) paged.order[i] = i;
+  }
+  return paged.order;
+}
+
+function pagedSearchText(paged) {
+  if (!paged.searchText) {
+    const model = paged.model;
+    paged.searchText = model.rows.map(function (row) {
+      const cells = Array.isArray(row) ? row : (row && Array.isArray(row.cells) ? row.cells : []);
+      let text = '';
+      for (let c = 0; c < cells.length; c++) text += model.cellText(cells[c], model.headerMeta[c] || null);
+      return text.toLowerCase();
+    });
+  }
+  return paged.searchText;
+}
+
+function applyPagedTableState(tbl) {
+  const paged = tbl.__paged;
+  const pageSizeRaw = tbl.dataset.pageSize || '20';
+  const pageSize = pageSizeRaw === 'all' ? 0 : Number(pageSizeRaw);
+  const input = document.querySelector('.table-filter-input[data-target-table="' + tbl.id + '"]');
+  const query = input ? input.value.trim().toLowerCase() : '';
+
+  let matched = pagedOrder(paged);
+  if (query) {
+    const searchText = pagedSearchText(paged);
+    const filtered = [];
+    for (let i = 0; i < matched.length; i++) if (searchText[matched[i]].includes(query)) filtered.push(matched[i]);
+    matched = filtered;
+  }
+
+  const window_ = pageWindow(tbl, matched.length, pageSize);
+  const fragment = document.createDocumentFragment();
+  const rows = paged.model.rows;
+  for (let i = window_.start; i < Math.min(window_.end, matched.length); i++) fragment.appendChild(paged.model.buildRow(rows[matched[i]], matched[i]));
+  paged.tbody.replaceChildren(fragment);
+  updatePagerUi(tbl, matched.length, window_, query, pageSizeRaw);
   applyTableCellClamp(tbl);
 }
 
-function setupSortableTables() {
-  document.querySelectorAll('table').forEach(function (tbl) {
+// Sorts a large table over its data. A column with any number sorts as numbers (largest first on the first click), otherwise as text;
+// cells with no value go last either way. Returns the direction used.
+function sortPagedTable(tbl, column, direction) {
+  const paged = tbl.__paged;
+  const model = paged.model;
+  const rows = model.rows;
+  const keys = new Array(rows.length);
+  let numericColumn = false;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const cells = Array.isArray(row) ? row : (row && Array.isArray(row.cells) ? row.cells : []);
+    const key = model.sortValue(cells[column], model.headerMeta[column] || null);
+    keys[i] = key;
+    if (typeof key === 'number') numericColumn = true;
+  }
+  if (numericColumn) for (let i = 0; i < keys.length; i++) if (typeof keys[i] !== 'number') keys[i] = null;
+  const dir = direction === 0 ? (numericColumn ? -1 : 1) : direction;
+
+  const order = pagedOrder(paged);
+  order.sort(function (a, b) {
+    const ka = keys[a], kb = keys[b];
+    if (ka === null || kb === null) return ka === kb ? a - b : (ka === null ? 1 : -1);
+    if (ka === kb) return a - b;
+    return dir * (ka < kb ? -1 : 1);
+  });
+  tbl.dataset.page = '1';
+  applyPagedTableState(tbl);
+  return dir;
+}
+
+function setupSortableTables(scope) {
+  (scope || document).querySelectorAll('table').forEach(function (tbl) {
+    if (tbl.dataset.sortBound === '1') return;
+    tbl.dataset.sortBound = '1';
     const parseSortableNumber = function (cell) {
       if (!cell) return NaN;
 
@@ -138,6 +231,13 @@ function setupSortableTables() {
       th.setAttribute('tabindex', '0');
       let dir = 0;
       function doSort() {
+        if (tbl.__paged) {
+          dir = sortPagedTable(tbl, col, dir);
+          ths.forEach(function (h) { h.removeAttribute('aria-sort'); });
+          th.setAttribute('aria-sort', dir > 0 ? 'ascending' : 'descending');
+          dir = -dir;
+          return;
+        }
         const tb = tbl.querySelector('tbody'); if (!tb) return;
         const rows = Array.from(tb.querySelectorAll('tr'));
         if (dir === 0) {
@@ -169,53 +269,58 @@ function setupSortableTables() {
   });
 }
 
-export function setupDetailTables() {
-  document.querySelectorAll('table.detail-filterable-table').forEach(function (tbl) {
-    tbl.__applyManagedState = function () { applyManagedTableState(tbl); };
-    applyManagedTableState(tbl);
-  });
+function initDetailTable(tbl) {
+  if (!tbl.__applyManagedState) tbl.__applyManagedState = function () { applyManagedTableState(tbl); };
+  applyManagedTableState(tbl);
+}
 
+function tableFor(element, selector) {
+  const control = element && element.closest ? element.closest(selector) : null;
+  const tableId = control ? control.getAttribute('data-target-table') : null;
+  const tbl = tableId ? document.getElementById(tableId) : null;
+  return control && tbl ? { control: control, tbl: tbl } : null;
+}
+
+export function setupDetailTables() {
+  document.querySelectorAll('table.detail-filterable-table').forEach(initDetailTable);
   applyTableCellClamp(document);
 
-  document.querySelectorAll('.table-filter-input[data-target-table]').forEach(function (input) {
-    input.addEventListener('input', function () {
-      const tableId = input.getAttribute('data-target-table');
-      const tbl = tableId ? document.getElementById(tableId) : null;
-      if (!tbl) return;
-      tbl.dataset.page = '1';
-      applyManagedTableState(tbl);
-    });
+  // One listener per kind of control on the document, so a table built later (a lazily opened section) works without being bound.
+  document.addEventListener('input', function (e) {
+    const hit = tableFor(e.target, '.table-filter-input[data-target-table]');
+    if (!hit) return;
+    hit.tbl.dataset.page = '1';
+    applyManagedTableState(hit.tbl);
   });
 
-  document.querySelectorAll('.table-page-size-select[data-target-table]').forEach(function (select) {
-    select.addEventListener('change', function () {
-      const tableId = select.getAttribute('data-target-table');
-      const tbl = tableId ? document.getElementById(tableId) : null;
-      if (!tbl) return;
-      tbl.dataset.pageSize = select.value;
-      tbl.dataset.page = '1';
-      applyManagedTableState(tbl);
-    });
+  document.addEventListener('change', function (e) {
+    const hit = tableFor(e.target, '.table-page-size-select[data-target-table]');
+    if (!hit) return;
+    hit.tbl.dataset.pageSize = hit.control.value;
+    hit.tbl.dataset.page = '1';
+    applyManagedTableState(hit.tbl);
   });
 
-  document.querySelectorAll('.table-page-prev-btn[data-target-table]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      const tableId = btn.getAttribute('data-target-table');
-      const tbl = tableId ? document.getElementById(tableId) : null;
-      if (!tbl) return;
-      tbl.dataset.page = String(Math.max(1, Number(tbl.dataset.page || '1') - 1));
-      applyManagedTableState(tbl);
-    });
+  document.addEventListener('click', function (e) {
+    const prev = tableFor(e.target, '.table-page-prev-btn[data-target-table]');
+    if (prev) {
+      prev.tbl.dataset.page = String(Math.max(1, Number(prev.tbl.dataset.page || '1') - 1));
+      applyManagedTableState(prev.tbl);
+      return;
+    }
+    const next = tableFor(e.target, '.table-page-next-btn[data-target-table]');
+    if (next) {
+      next.tbl.dataset.page = String(Number(next.tbl.dataset.page || '1') + 1);
+      applyManagedTableState(next.tbl);
+    }
   });
 
-  document.querySelectorAll('.table-page-next-btn[data-target-table]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      const tableId = btn.getAttribute('data-target-table');
-      const tbl = tableId ? document.getElementById(tableId) : null;
-      if (!tbl) return;
-      tbl.dataset.page = String(Number(tbl.dataset.page || '1') + 1);
-      applyManagedTableState(tbl);
-    });
+  document.addEventListener('dumpdetective:section-body-rendered', function (ev) {
+    const wrapper = ev.detail && ev.detail.wrapper;
+    if (!wrapper) return;
+    wrapper.querySelectorAll('table.detail-filterable-table').forEach(function (tbl) { if (!tbl.__paged && !(tbl.dataset.lazyHydrate === '1' && tbl.dataset.hydrated !== '1')) initDetailTable(tbl); });
+    applyTableCellClamp(wrapper);
+    setupSortableTables(wrapper);
   });
 
   setupSortableTables();

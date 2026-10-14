@@ -37,6 +37,7 @@
     <EmbeddedResource Include="Templates\report.ui.actions.js" />
     <EmbeddedResource Include="Templates\report.ui.tables.js" />
     <EmbeddedResource Include="Templates\report.ui.js" />
+    <EmbeddedResource Include="Templates\report.segments.js" />
     <EmbeddedResource Include="Templates\report.main.js" />
   </ItemGroup>
 

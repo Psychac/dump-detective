@@ -1,30 +1,12 @@
 import * as Dom from './report.dom.js';
 import * as R from './report.renderers.js';
 import * as UI from './report.ui.js';
-
-// The embedded payload script can carry data-encoding="gzip-base64" for large reports
-// (see docs/refactor/report-payload-size-reduction-design.md, F7). Plain "json" (or the
-// attribute being absent, for older reports) is returned as-is.
-async function decodePayloadText(el) {
-  const text = el.textContent;
-  if (!text || !text.trim()) return null;
-  const encoding = el.dataset ? el.dataset.encoding : null;
-  if (encoding !== 'gzip-base64') return text;
-  if (typeof DecompressionStream === 'undefined') {
-    throw new Error('This report\'s data is gzip-compressed and requires a browser with ' +
-      'DecompressionStream support (current Chrome, Edge, or Firefox) to open.');
-  }
-  const binary = atob(text.trim());
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const decompressed = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-  return await new Response(decompressed).text();
-}
+import { decodeElementText, rehydrateSegments } from './report.segments.js';
 
 async function loadPayload() {
   try {
     const el = document.getElementById('report-json');
-    const text = el ? await decodePayloadText(el) : null;
+    const text = el ? await decodeElementText(el) : null;
     if (text && text.trim()) {
       const parsed = JSON.parse(text);
       window.__REPORT__ = parsed;
@@ -71,6 +53,7 @@ async function bootstrap() {
   const payload = await loadPayload();
   if (!payload || !payload.doc) return;
   const doc = payload.doc;
+  await rehydrateSegments(doc);
   R.setStringPool(doc.strings);
   R.setEntities(doc.entities);
   R.setEntityData(doc);

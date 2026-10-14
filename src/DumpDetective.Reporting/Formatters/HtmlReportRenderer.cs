@@ -93,8 +93,18 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             }
         }
 
-        reportJson = JsonSerializer.Serialize(docForClient, HtmlEmbeddedReportJson.DocumentTypeInfo);
-        reportJson = CompactReportJson(docForClient, reportJson);
+        // Everything the page does not show before something is opened ships as lazy segments beside the core (m4-payload-plan.md); a
+        // pre-rendered report keeps its single payload, and a trend report comes back from the segmenter unchanged with no segments.
+        SegmentedReport segmented = shouldPreRender ? new SegmentedReport(docForClient, []) : ReportSegmenter.Segment(docForClient);
+        string segmentElements = string.Empty;
+        if (segmented.Segments.Count > 0)
+        {
+            EncodedSegmentSet encoded = ReportSegmentEncoder.Encode(segmented.Segments);
+            segmentElements = encoded.ManifestElement + encoded.SegmentElements;
+        }
+
+        reportJson = JsonSerializer.Serialize(segmented.Core, HtmlEmbeddedReportJson.DocumentTypeInfo);
+        reportJson = CompactReportJson(segmented.Core, reportJson);
 
         // For trend reports: serialize each per-dump document independently using the proven
         // AnalysisReportDocument serializer (same path that produces working single-dump JSON).
@@ -131,6 +141,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             .Replace("{{CSS}}", _css)
             .Replace("{{REPORT_JSON_ENCODING}}", reportJsonEncoding)
             .Replace("{{REPORT_JSON}}", reportJsonBody)
+            .Replace("{{SEGMENT_ELEMENTS}}", segmentElements)
             .Replace("{{JS}}", _js)
             .Replace("{{PRE_RENDERED_HEALTH_SCORECARD}}", preHealthScorecard)
             .Replace("{{PRE_RENDERED_FINDINGS}}", preFindings)
@@ -239,6 +250,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             var sb = new StringBuilder(512 * 1024);
 
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.dom.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.segments.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.shared.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.blocks.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.charts.js")));

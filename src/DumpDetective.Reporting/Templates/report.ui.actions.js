@@ -51,11 +51,8 @@ export function setupExportActions(announce) {
   const btnJson = document.getElementById('btn-download-json');
   if (btnJson) btnJson.addEventListener('click', function () {
     try {
-      const jsonEl = document.getElementById('report-json');
-      let payload = null;
-      if (jsonEl && jsonEl.textContent && jsonEl.textContent.trim()) {
-        try { payload = JSON.parse(jsonEl.textContent); } catch (e) { payload = window.__REPORT__ || null; }
-      } else payload = window.__REPORT__ || null;
+      // window.__REPORT__ is the whole document: the embedded core with its lazy segments put back.
+      let payload = window.__REPORT__ || null;
       payload = resolveStringPoolForDownload(payload);
       const json = JSON.stringify(payload, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
@@ -66,12 +63,8 @@ export function setupExportActions(announce) {
   const btnCsv = document.getElementById('btn-export-csv');
   if (btnCsv) btnCsv.addEventListener('click', function () {
     try {
-      const jsonEl = document.getElementById('report-json');
-      let payload = null;
-      if (jsonEl && jsonEl.textContent && jsonEl.textContent.trim()) {
-        try { payload = JSON.parse(jsonEl.textContent); } catch (e) { payload = window.__REPORT__ || null; }
-      } else { payload = window.__REPORT__ || null; }
-      const report = (payload && payload.report) ? payload.report : payload;
+      const payload = window.__REPORT__ || null;
+      const report =(payload && payload.report) ? payload.report : payload;
       const findings = (report && Array.isArray(report.findings)) ? report.findings : [];
       if (!findings.length) { alert('No findings to export.'); return; }
       const headers = [

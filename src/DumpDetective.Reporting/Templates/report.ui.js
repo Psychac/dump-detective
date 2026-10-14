@@ -177,6 +177,7 @@ export function setupInteractivity(doc, announce) {
     for (let i = 0; i < targets.analyzerDetails.length; i++) {
       const detailsNode = targets.analyzerDetails[i];
       if (!detailsNode) continue;
+      if (detailsNode.dataset && detailsNode.dataset.revealedByHash === '1') continue;
       detailsNode.open = normalized === 'forensics' ? forensicsLockOpen : false;
     }
 
@@ -204,7 +205,8 @@ export function setupInteractivity(doc, announce) {
       for (let i = 0; i < deferredTargets.analyzerDetails.length; i++) {
         const detailsNode = deferredTargets.analyzerDetails[i];
         if (!detailsNode) continue;
-        detailsNode.open = normalized === 'forensics' ? forensicsLockOpen : false;
+        if (detailsNode.dataset && detailsNode.dataset.revealedByHash === '1') continue;
+      detailsNode.open = normalized === 'forensics' ? forensicsLockOpen : false;
       }
       for (let i = 0; i < deferredTargets.provenanceDetails.length; i++) {
         const detailsNode = deferredTargets.provenanceDetails[i];
@@ -291,10 +293,30 @@ export function setupInteractivity(doc, announce) {
 
   syncCollapsibleAria(document);
 
+  // A table's id exists only once its section's lazy body has been built (m4-payload-plan.md, D11), so a link to one opens the section it
+  // belongs to; the section announces when its body is ready and the link is followed again then.
+  function openSectionForUnbuiltTarget(id) {
+    const match = /^detail-table-(.+)-\d+$/.exec(id);
+    if (!match) return;
+    const section = document.querySelector('.analyzer-section[data-detail-index="' + match[1] + '"]');
+    const details = section && section.querySelector(':scope > details');
+    if (details) { details.open = true; details.dataset.revealedByHash = '1'; }
+  }
+
+  document.addEventListener('dumpdetective:section-body-rendered', function (ev) {
+    const id = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    const wrapper = ev.detail && ev.detail.wrapper;
+    if (!id || !wrapper) return;
+    const target = document.getElementById(id);
+    if (!target || !wrapper.contains(target)) return;
+    revealTargetForHash(id);
+    target.scrollIntoView({ behavior: 'auto', block: 'start' });
+  });
+
   function revealTargetForHash(id) {
     if (!id) return null;
     const target = document.getElementById(id);
-    if (!target) return null;
+    if (!target) { openSectionForUnbuiltTarget(id); return null; }
 
     if (activeReadingMode === 'incident') {
       const requiresForensics = target.closest && target.closest('.analyzer-section, .provenance, #sec-appendix, #report-domains .domain-body');
@@ -306,7 +328,8 @@ export function setupInteractivity(doc, announce) {
     const hostSection = target.closest && target.closest('.analyzer-section');
     if (hostSection) {
       const details = hostSection.querySelector('details');
-      if (details) details.open = true;
+      // A section opened because a link points into it stays open when a reading-mode pass later sets every section's state.
+      if (details) { details.open = true; details.dataset.revealedByHash = '1'; }
     }
 
     const detailParent = target.closest && target.closest('details');

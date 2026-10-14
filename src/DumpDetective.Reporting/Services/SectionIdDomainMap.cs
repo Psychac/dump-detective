@@ -60,8 +60,8 @@ internal static class SectionIdDomainMap
         ["Hang Analysis"]              = ("Threads",    "D2"),
         ["LockGraphAnalyzer"]          = ("Threads",    "D3"),
         ["Lock Graph Analysis"]        = ("Threads",    "D3"),
-        ["ThreadStackClusterAnalyzer"] = ("Threads",    "D3"),
-        ["Thread Stack Signature Clustering"] = ("Threads", "D3"),
+        ["ThreadStackClusterAnalyzer"] = ("Threads",    "D5"),
+        ["Thread Stack Signature Clustering"] = ("Threads", "D5"),
         ["EventLeakAnalyzer"]          = ("Threads",    "D4"),
         ["Event Leak Analysis"]        = ("Threads",    "D4"),
 

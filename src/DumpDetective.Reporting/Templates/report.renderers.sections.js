@@ -1055,7 +1055,7 @@ export function buildAnalyzerSection(section, i) {
 }
 
 // A section whose body ships as a lazy segment loads it the first time the section is opened, then builds the body. A URL hash into the
-// section opens it, which loads it the same way; the hash target is scrolled to again once the body has changed the layout.
+// section opens it, which loads it the same way ; once the body is built the page is told (dumpdetective:section-body-rendered), so a link to something inside it can be followed.
 function attachLazySectionBody(section, details, content, wrapper, renderBody) {
   let started = false;
   async function load() {
@@ -1069,7 +1069,7 @@ function attachLazySectionBody(section, details, content, wrapper, renderBody) {
       await loadSectionSegment(section);
       status.remove();
       renderBody();
-      scrollToHashTargetWithin(wrapper);
+      document.dispatchEvent(new CustomEvent('dumpdetective:section-body-rendered', { detail: { wrapper: wrapper } }));
     } catch (err) {
       status.classList.add('lazy-section__status--error');
       status.setAttribute('role', 'alert');
@@ -1085,12 +1085,6 @@ function attachLazySectionBody(section, details, content, wrapper, renderBody) {
   });
 }
 
-function scrollToHashTargetWithin(wrapper) {
-  const id = decodeURIComponent((location.hash || '').replace(/^#/, ''));
-  if (!id) return;
-  const target = document.getElementById(id);
-  if (target && wrapper.contains(target)) target.scrollIntoView({ block: 'start' });
-}
 
 // ── T3b Correlation Timeline lane ─────────────────────────────────────────────
 

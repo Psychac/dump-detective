@@ -67,7 +67,14 @@ export function setupExportActions(announce) {
       await loadAllSections(window.__REPORT__ && (window.__REPORT__.report || window.__REPORT__));
       const payload = window.__REPORT__ || null;
       const report =(payload && payload.report) ? payload.report : payload;
-      const findings = (report && Array.isArray(report.findings)) ? report.findings : [];
+      // The embedded document carries findings per domain and across domains; report.findings (the flat list) is not serialized.
+      let findings = (report && Array.isArray(report.findings)) ? report.findings : [];
+      if (!findings.length && report) {
+        (Array.isArray(report.domains) ? report.domains : []).forEach(function (domain) {
+          (Array.isArray(domain.domainInsights) ? domain.domainInsights : []).forEach(function (f) { findings.push(f); });
+        });
+        (Array.isArray(report.crossDomainInsights) ? report.crossDomainInsights : []).forEach(function (f) { findings.push(f); });
+      }
       if (!findings.length) { alert('No findings to export.'); return; }
       const headers = [
         'ID',

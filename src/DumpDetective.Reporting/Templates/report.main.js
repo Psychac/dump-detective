@@ -97,6 +97,10 @@ async function bootstrap() {
   const executive = R.buildExecutiveSummary(doc);
   if (executive) main.appendChild(executive);
 
+  // The verdict (header, scorecard, executive summary) is in the page; let the browser paint it before the rest is built. This only changes
+  // the order of the same work, so the full page appears a frame later. Interactivity is wired after everything is built, below.
+  await new Promise(function (resolve) { requestAnimationFrame(function () { setTimeout(resolve, 0); }); });
+
   const coverageStrip = R.buildCoverageStrip(doc);
   if (coverageStrip) main.appendChild(coverageStrip);
 

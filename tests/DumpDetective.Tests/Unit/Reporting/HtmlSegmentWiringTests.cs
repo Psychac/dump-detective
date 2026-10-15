@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Core.Configuration;
@@ -41,5 +43,23 @@ public sealed class HtmlSegmentWiringTests
         var document = new SingleDumpReportDocument { DumpPath = "C:/dumps/Crash.dmp" };
 
         new HtmlReportRenderer().Render(document).Should().NotContain("<script id=\"dd-manifest\" type=");
+    }
+
+    [Fact]
+    public void Render_EverySegmentIdInTheCoreAndManifest_HasAnElementThatHoldsTheSectionContent()
+    {
+        string html = new HtmlReportRenderer().Render(DocumentWithATable());
+
+        string Body(string elementId) => Regex.Match(html, "<script id=\"" + Regex.Escape(elementId) + "\" type=\"application/json\" data-encoding=\"json\">(.*?)</script>", RegexOptions.Singleline).Groups[1].Value;
+
+        using JsonDocument manifest = JsonDocument.Parse(Body("dd-manifest"));
+        string[] ids = manifest.RootElement.EnumerateArray().Select(entry => entry.GetProperty("id").GetString()!).ToArray();
+        ids.Should().Contain("s-A1");
+
+        foreach (string segmentId in ids)
+            Body("dd-seg-" + segmentId).Should().NotBeNullOrEmpty($"segment {segmentId} is listed in the manifest");
+
+        using JsonDocument section = JsonDocument.Parse(Body("dd-seg-s-A1"));
+        section.RootElement.GetProperty("compactTables")[0].GetProperty("rows").GetArrayLength().Should().Be(2);
     }
 }

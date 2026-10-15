@@ -171,8 +171,24 @@ A reader gets the verdict fast, and a large table is genuinely navigable. Three 
      - **Not built: the generated-title spec** (noun, sort column, complete or not) listed in D12. The total now tells complete from cut, which was the part that mattered; a noun and sort column would still be a per-builder change and nothing else needs them. "Top" stays in titles whose tables carry a total and are cut.
      - **Seen, not changed:** "Exception message distribution per type" ships 15 rows on this dump and "Top retention types" 6; I did not trace whether 15 is a cap.
      - **Tests:** the full suite passes (1,883 passed, 66 skipped): crash and dominator builders set the totals (and the exception type tables set none), Markdown prints both sentences and nothing when the total equals the rows, the segmenter keeps the fields on a stub and writes neither when they are null.
-9. **Verify.** *(pending)* Run the § 16.2 gates on the reference dump and open the report in a browser (M3's strip and panel were never looked at in one). Measure process memory, not only JS heap. Add golden and size tests built from the real payload, not a synthetic fixture (131,568 distinct type names will not reproduce synthetically).
+9. **Verify.** *(measured 2026-10-15 on the reference dump, report `m4-step8d`; one machine, one run each, headless Chrome from `file://`; the pre-M4 report `m4-step1/before` was measured with the same script)*
+   - **Method:** time to verdict is the first moment `#sec-exec` or `.health-scorecard` exists (a mutation observer, not a paint); process memory is the summed working set of every Chrome process of the run, which counts shared pages more than once, so only differences between runs mean anything (a blank page measured 787 MB the same way); the largest table is the 68,576-row finalizer queue.
+   - **Results against § 16.2:**
 
+     | Gate | Target | Before M4 | Now | Met |
+     |---|---|---|---|---|
+     | Time to verdict | 150 ms | 1,788 ms | 262 ms (first contentful paint 116 ms, DOM ready 145 ms) | no, 1.7x over; the page's own scripts run before the verdict builds |
+     | `core` inflated | 2 MB | 20.8 MB (one blob) | 0.28 MB | yes |
+     | Total payload inflated | 8 MB | 20.8 MB | 20.5 MB (core 0.28 + 57 segments 20.2); 3.4 MB encoded | no, and unchanged: the data is lazy, not smaller |
+     | Browser heap after full drill-down | 250 MB | JS heap 49 MB, process +1,250 MB over blank | JS heap 56 MB, process about +220 MB over blank | met by the crude process figure, margin small; JS heap far under |
+     | Largest table, first row | 100 ms | 2,354 ms | 4 ms (20 DOM rows of 68,576) | yes |
+     | Sort and filter, full column | 200 ms | sort 670 ms, filter 346 ms | sort 41 ms, first filter 71 ms, next 7 ms (main thread) | yes |
+     | Shell excluding data (CSS + JS + HTML) | 120 KB | about 540 KB | 544 KB (CSS 167 KB against 20 KB, JS 370 KB unminified against 80 KB) | no; owned by ReportTemplateCleanSlate T0-T5, not M4 |
+
+   - **What the misses mean:** the verdict gate is the only one M4 owns that is still open. 262 ms is mostly the 544 KB of CSS and JavaScript the page parses and runs before it builds anything; the core itself costs about 13 ms to inflate and parse. Getting to 150 ms needs the template work (minified, split bundle), or a measurement of what the bootstrap does before the scorecard. The 8 MB total is a target the lazy design does not try to meet: opening everything still loads 20 MB, and only column encoding tricks (D3, deferred) would shrink it.
+   - **Process memory is crude.** The old report's drill-down opened 2.07 million DOM nodes and 2 GB of process memory; the new one 135,000 and about 1 GB, against a 787 MB blank page. Treat "about +220 MB" as an order of magnitude.
+   - **Integration tests:** the six tests that parse `report-json` did not need changes: they use small documents and assert core fields, and all pass. There was no test that the segments listed in the manifest exist and hold the section content; one was added (`HtmlSegmentWiringTests`). A test of core plus segments against a real payload does not exist: real-dump tests are skipped by default and take one 3 GB run each.
+   - **Still unmeasured:** process memory with a proper private-bytes figure, anything on a second dump or a larger one (the 25 GB class), and a visual check of the report.
 10. **Trend reports.** *(pending, D4)* Segment `perDumpDocs` and trend sections.
 
 ## Deferred work (do not drop)

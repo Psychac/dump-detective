@@ -48,7 +48,7 @@ public sealed class ReportSinksTests : IDisposable
 
         await writer.WriteAsync(resolved, document, observations: [], artifacts: null, CancellationToken.None);
 
-        File.ReadAllText(outputPath).Should().Be(_facade.RenderDocument(document, format, new HtmlRenderSettings(false, resolved.Report.StyleVersion)));
+        File.ReadAllText(outputPath).Should().Be(_facade.RenderDocument(document, format, new HtmlRenderSettings(resolved.Report.StyleVersion)));
         File.ReadAllText(Path.Combine(_tempDir, Path.GetFileNameWithoutExtension(outputFileName) + ReportJsonSink.Suffix)).Should().Be(_facade.RenderDocument(document, ReportFormat.Json));
     }
 }

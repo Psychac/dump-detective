@@ -15,7 +15,7 @@ internal sealed class FileReportSink(ReportBuilderFacade reportBuilderFacade) : 
         string rendered = reportBuilderFacade.RenderDocument(
             document,
             resolved.Report.Format,
-            new HtmlRenderSettings(resolved.Report.PreRender, resolved.Report.StyleVersion));
+            new HtmlRenderSettings(resolved.Report.StyleVersion));
 
         await File.WriteAllTextAsync(resolved.OutputPath, rendered, cancellationToken);
         ConsoleUx.ReportWritten(resolved.OutputPath);

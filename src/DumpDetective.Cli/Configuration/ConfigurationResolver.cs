@@ -163,6 +163,18 @@ internal sealed class ConfigurationResolver
                             "every analyzer now runs fixed, exact analysis with no user-tunable thresholds. Remove it.");
                     }
                 }
+
+                if (string.Equals(prop.Name, "Report", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (JsonProperty reportProp in prop.Value.EnumerateObject())
+                    {
+                        if (string.Equals(reportProp.Name, "PreRender", StringComparison.OrdinalIgnoreCase))
+                        {
+                            ConsoleUx.Warning($"Config key '{prop.Name}.{reportProp.Name}' is deprecated and no longer has any effect — " +
+                                "the HTML report no longer has a server pre-render mode. Remove it.");
+                        }
+                    }
+                }
             }
         }
         catch (JsonException)
@@ -203,7 +215,6 @@ internal sealed class ConfigurationResolver
         {
             Format = config.Report?.Format ?? ConfigurationParseHelpers.ParseReportFormat(config.ReportFormat) ?? request.OutputFormat ?? ReportFormat.Html,
             StyleVersion = config.Report?.StyleVersion ?? ConfigurationParseHelpers.ParseReportStyle(config.ReportStyleVersion) ?? request.ReportStyleVersion ?? ReportStyleVersion.V1,
-            PreRender = config.Report?.PreRender ?? request.PreRender,
             ObservationsUncompressed = config.Report?.ObservationsUncompressed ?? request.ObservationsUncompressed
         };
     }

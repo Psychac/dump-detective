@@ -11,13 +11,9 @@ using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Reporting.Formatters;
 
-internal sealed record HtmlRenderSettings(
-    bool PreRender,
-    ReportStyleVersion StyleVersion)
+internal sealed record HtmlRenderSettings(ReportStyleVersion StyleVersion)
 {
-    public static readonly HtmlRenderSettings Default = new(
-        PreRender: false,
-        StyleVersion: ReportStyleVersion.V1);
+    public static readonly HtmlRenderSettings Default = new(StyleVersion: ReportStyleVersion.V1);
 }
 
 /// <summary>
@@ -43,59 +39,38 @@ internal sealed class HtmlReportRenderer : IReportFormatter
     public string Render(AnalysisReportDocument doc, HtmlRenderSettings settings)
     {
         string reportJson = JsonSerializer.Serialize(doc, HtmlEmbeddedReportJson.DocumentTypeInfo);
-        string preFindings = string.Empty;
-        string preHealthScorecard = string.Empty;
-        string preAnalyzers = string.Empty;
-        bool isV2Style = settings.StyleVersion == ReportStyleVersion.V2;
-        bool shouldPreRender = settings.PreRender;
-        if (!shouldPreRender && !isV2Style && (reportJson.Length > 2_000_000 || doc.Findings?.Count >= 1000)) shouldPreRender = true;
-        if (shouldPreRender && _template.Contains("{{PRE_RENDERED_HEALTH_SCORECARD}}"))
-            preHealthScorecard = ReportHtmlShared.RenderHealthScorecard(doc.HealthScorecard);
-        if (shouldPreRender && _template.Contains("{{PRE_RENDERED_FINDINGS}}"))
-            preFindings = ReportHtmlShared.RenderFindings(doc.Findings);
-        if (shouldPreRender && _template.Contains("{{PRE_RENDERED_ANALYZER_SECTIONS}}"))
-            preAnalyzers = ReportHtmlShared.RenderAnalyzerSections(doc.AnalyzerSections);
-
         AnalysisReportDocument docForClient = doc with
         {
-            RenderMode = shouldPreRender ? "prerendered" : "client",
             ReportStyleVersion = settings.StyleVersion == ReportStyleVersion.V2 ? "v2" : "v1"
         };
 
-        // Skip string pooling for pre-rendered reports: their table markup is already baked
-        // into preAnalyzers as static HTML (ReportHtmlShared.RenderAnalyzerSections, above,
-        // using the original unpooled `doc`), so client-side interactivity that re-reads the
-        // embedded payload directly would need its own pool-resolution path we don't build here.
-        if (!shouldPreRender)
+        docForClient = EntityCellPass.Apply(docForClient);
+        (IReadOnlyList<ReportDomainSection>? pooledDomains,
+            IReadOnlyList<AnalyzerDetailSection>? pooledTrendSections,
+            IReadOnlyList<string>? stringPool) = ReportStringPool.Apply(
+                docForClient.Domains,
+                (docForClient as TrendReportDocument)?.TrendAnalyzerSections);
+
+        if (stringPool != null)
         {
-            docForClient = EntityCellPass.Apply(docForClient);
-            (IReadOnlyList<ReportDomainSection>? pooledDomains,
-                IReadOnlyList<AnalyzerDetailSection>? pooledTrendSections,
-                IReadOnlyList<string>? stringPool) = ReportStringPool.Apply(
-                    docForClient.Domains,
-                    (docForClient as TrendReportDocument)?.TrendAnalyzerSections);
+            docForClient = docForClient with { Domains = pooledDomains, Strings = stringPool };
+            if (docForClient is TrendReportDocument pooledTrendDoc && pooledTrendSections != null)
+                docForClient = pooledTrendDoc with { TrendAnalyzerSections = pooledTrendSections };
+        }
 
-            if (stringPool != null)
+        docForClient = docForClient with { Domains = EventLeakSubscriberPool.Apply(docForClient.Domains) };
+        if (docForClient is TrendReportDocument trendForSubscriberPool)
+        {
+            docForClient = trendForSubscriberPool with
             {
-                docForClient = docForClient with { Domains = pooledDomains, Strings = stringPool };
-                if (docForClient is TrendReportDocument pooledTrendDoc && pooledTrendSections != null)
-                    docForClient = pooledTrendDoc with { TrendAnalyzerSections = pooledTrendSections };
-            }
-
-            docForClient = docForClient with { Domains = EventLeakSubscriberPool.Apply(docForClient.Domains) };
-            if (docForClient is TrendReportDocument trendForSubscriberPool)
-            {
-                docForClient = trendForSubscriberPool with
-                {
-                    TrendAnalyzerSections = EventLeakSubscriberPool.Apply(trendForSubscriberPool.TrendAnalyzerSections)
-                        ?? trendForSubscriberPool.TrendAnalyzerSections
-                };
-            }
+                TrendAnalyzerSections = EventLeakSubscriberPool.Apply(trendForSubscriberPool.TrendAnalyzerSections)
+                    ?? trendForSubscriberPool.TrendAnalyzerSections
+            };
         }
 
         // Everything the page does not show before something is opened ships as lazy segments beside the core (m4-payload-plan.md); a
-        // pre-rendered report keeps its single payload, and a trend report comes back from the segmenter unchanged with no segments.
-        SegmentedReport segmented = shouldPreRender ? new SegmentedReport(docForClient, []) : ReportSegmenter.Segment(docForClient);
+        // trend report comes back from the segmenter unchanged with no segments.
+        SegmentedReport segmented = ReportSegmenter.Segment(docForClient);
         string segmentElements = string.Empty;
         if (segmented.Segments.Count > 0)
         {
@@ -129,11 +104,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         // }
         string payloadJson = "{\"report\":" + reportJson + ",\"perDumpDocs\":" + perDumpJson + "}";
 
-        // Pre-rendered reports already duplicate their content directly into the HTML body,
-        // so keep their embedded payload plain rather than adding a decompression dependency
-        // to a path that doesn't need the byte savings as much.
-        bool compressPayload = !shouldPreRender
-            && Encoding.UTF8.GetByteCount(payloadJson) > CompressionThresholdBytes;
+        bool compressPayload = Encoding.UTF8.GetByteCount(payloadJson) > CompressionThresholdBytes;
         string reportJsonEncoding = compressPayload ? "gzip-base64" : "json";
         string reportJsonBody = compressPayload ? GzipCompressToBase64(payloadJson) : payloadJson;
 
@@ -142,10 +113,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             .Replace("{{REPORT_JSON_ENCODING}}", reportJsonEncoding)
             .Replace("{{REPORT_JSON}}", reportJsonBody)
             .Replace("{{SEGMENT_ELEMENTS}}", segmentElements)
-            .Replace("{{JS}}", _js)
-            .Replace("{{PRE_RENDERED_HEALTH_SCORECARD}}", preHealthScorecard)
-            .Replace("{{PRE_RENDERED_FINDINGS}}", preFindings)
-            .Replace("{{PRE_RENDERED_ANALYZER_SECTIONS}}", preAnalyzers);
+            .Replace("{{JS}}", _js);
     }
 
     private static string GzipCompressToBase64(string text)

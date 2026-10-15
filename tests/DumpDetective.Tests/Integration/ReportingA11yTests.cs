@@ -17,7 +17,7 @@ public sealed class ReportingA11yTests
         var renderer = new HtmlReportRenderer();
         var doc = serializer.Serialize("dump.dmp", System.Array.Empty<DumpDetective.Core.Models.AnalyzerRunResult>(), System.TimeSpan.FromSeconds(0.5), new DumpDetective.Reporting.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(), new DumpDetective.Reporting.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
 
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+        string html = renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V2));
 
         html.Should().Contain("timeline-delta-chip");
         html.Should().Contain("aria-label");
@@ -31,7 +31,7 @@ public sealed class ReportingA11yTests
         var renderer = new HtmlReportRenderer();
         var doc = serializer.Serialize("dump.dmp", System.Array.Empty<DumpDetective.Core.Models.AnalyzerRunResult>(), System.TimeSpan.FromSeconds(0.5), new DumpDetective.Reporting.Services.DefaultSectionBuilderFactory().CreateAnalyzerBuilders(), new DumpDetective.Reporting.Services.DefaultSectionBuilderFactory().CreateReportBuilders());
 
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+        string html = renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V2));
 
         html.Should().Contain("trend-correlation-timeline__lane");
         html.Should().Contain("timeline-event");

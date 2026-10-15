@@ -1,7 +1,7 @@
 // Chart and sparkline rendering — renderSparklines, renderCharts, SVG chart builders.
 import { el, nvl } from './report.dom.js';
 
-// ── DOM-based sparkline rendering (post-render pass for pre-rendered tables) ──
+// ── DOM-based sparkline rendering (post-render pass over td[data-sparkline] cells) ──
 
 export function renderSparklines() {
   const tds = document.querySelectorAll('td[data-sparkline]');
@@ -49,7 +49,7 @@ export function renderSparklines() {
   }
 }
 
-// ── DOM-based chart rendering (post-render pass for pre-rendered chart blocks) ─
+// ── DOM-based chart rendering (post-render pass over .detail-chart[data-chart-payload] blocks) ─
 
 export function renderCharts() {
   const blocks = document.querySelectorAll('.detail-chart[data-chart-kind][data-chart-payload]');

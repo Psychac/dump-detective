@@ -2,7 +2,6 @@
   "$kind": "single",
   "dumpPath": "C:/fixtures/RichEvidence.dmp",
   "schemaVersion": "2.1",
-  "renderMode": "client",
   "reportStyleVersion": "v1",
   "generatedAtUtc": "2026-01-01T12:00:00Z",
   "elapsedSeconds": 9.8

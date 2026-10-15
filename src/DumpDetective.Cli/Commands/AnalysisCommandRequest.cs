@@ -15,7 +15,6 @@ internal sealed record AnalysisCommandRequest(
     bool EnableMemoryDiagnostics,
     bool EnablePerformanceDiagnostics,
     ReportStyleVersion? ReportStyleVersion = null,
-    bool PreRender = false,
     bool ObservationsUncompressed = false,
     string? CacheDirectory = null,
     string? TracePath = null);

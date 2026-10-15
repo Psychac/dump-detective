@@ -58,10 +58,6 @@ internal sealed class RootCommandBuilder
             "TraceReportWriter). Defaults next to the input file when omitted."
     };
 
-    // TODO: pre-render?? there is something like this??
-    private readonly Option<bool> _preRenderOption = new("--pre-render") { Description = "Pre-render findings and analyzer sections server-side for faster initial paint." };
-    
-    
     private readonly Option<bool> _observationsUncompressedOption = new("--observations-uncompressed") { Description = "Write the observations side-car as plain JSON instead of gzip." };
 
     private readonly Option<string?> _cacheDirectoryOption = new("--cache-dir")
@@ -92,7 +88,6 @@ internal sealed class RootCommandBuilder
             _excludeAnalyzersOption,
             _reportFormatOption,
             _reportStyleOption,
-            _preRenderOption,
             _observationsUncompressedOption,
             _outputPathOption,
             _cacheDirectoryOption,
@@ -116,7 +111,6 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_memoryDiagnosticsOption),
             parseResult.GetValue(_performanceDiagnosticsOption),
             ParseReportStyle(parseResult.GetValue(_reportStyleOption)),
-            parseResult.GetValue(_preRenderOption),
             parseResult.GetValue(_observationsUncompressedOption),
             parseResult.GetValue(_cacheDirectoryOption),
             parseResult.GetValue(_tracePathOption));

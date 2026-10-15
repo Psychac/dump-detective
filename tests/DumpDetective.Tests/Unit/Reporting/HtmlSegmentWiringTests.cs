@@ -36,14 +36,6 @@ public sealed class HtmlSegmentWiringTests
     }
 
     [Fact]
-    public void Render_PreRenderedReport_KeepsASinglePayloadWithNoSegments()
-    {
-        string html = new HtmlReportRenderer().Render(DocumentWithATable(), new HtmlRenderSettings(PreRender: true, ReportStyleVersion.V1));
-
-        html.Should().NotContain("<script id=\"dd-manifest\" type=").And.NotContain("<script id=\"dd-seg-s-A1\" type=");
-    }
-
-    [Fact]
     public void Render_ReportWithNothingLazy_EmitsNoSegmentElements()
     {
         var document = new SingleDumpReportDocument { DumpPath = "C:/dumps/Crash.dmp" };

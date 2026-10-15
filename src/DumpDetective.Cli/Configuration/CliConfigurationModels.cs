@@ -29,7 +29,6 @@ internal sealed class ReportOptionsModel
 {
     public ReportFormat? Format { get; init; }
     public ReportStyleVersion? StyleVersion { get; init; }
-    public bool? PreRender { get; init; }
     public bool? ObservationsUncompressed { get; init; }
 }
 

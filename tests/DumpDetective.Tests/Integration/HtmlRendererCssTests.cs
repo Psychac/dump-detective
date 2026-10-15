@@ -78,7 +78,7 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+        string html = renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V2));
 
         html.Should().Contain("\"reportStyleVersion\":\"v2\"");
         html.Should().Contain("id=\"report-right-rail\"");
@@ -117,7 +117,7 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+        string html = renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V2));
 
         html.Should().Contain("id=\"report-sr-summary\"");
         html.Should().Contain("href=\"#report-domains\"");
@@ -148,7 +148,7 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+        string html = renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V2));
 
         int headerPos = html.IndexOf("buildHeader(doc)", StringComparison.Ordinal);
         int scorecardPos = html.IndexOf("buildHealthScorecard(doc)", StringComparison.Ordinal);
@@ -196,89 +196,13 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+        string html = renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V2));
 
         html.Should().Contain("main.appendChild(actionQueue);");
         html.Should().Contain("main.appendChild(forensicsRail);");
         html.Should().NotContain("rightRail.appendChild(actionQueue);");
         html.Should().NotContain("rightRail.appendChild(forensicsRail);");
         html.Should().Contain("body.report-style-v2.has-right-rail .page-shell");
-    }
-
-    [Fact]
-    public void Render_PreRenderedHealthScorecard_UsesCardGridMarkup()
-    {
-        var serializer = new ReportSerializer();
-        var finding = ClaimFactory.Create(
-            analyzer: "RetentionAnalyzer",
-            category: "Memory",
-            severity: Severity.Warning,
-            title: "Potential retention",
-            narrative: "Object growth observed",
-            recommendation: "Investigate root path",
-            tags: ["memory"],
-            fingerprint: "retention-1");
-
-        var fakeRun = new AnalyzerRunResult(
-            "RetentionAnalyzer",
-            AnalyzerExecutionStatus.Success,
-            TimeSpan.FromMilliseconds(1),
-            new GenericAnalyzerDomainResult(),
-            null,
-            null,
-            Findings: [finding]);
-
-        AnalysisReportDocument doc = serializer.Serialize(
-            "dump.dmp",
-            new[] { fakeRun },
-            TimeSpan.FromSeconds(0.5),
-            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DefaultSectionBuilderFactory().CreateReportBuilders());
-
-        var renderer = new HtmlReportRenderer();
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: true, StyleVersion: ReportStyleVersion.V1));
-
-        html.Should().Contain("health-scorecard__banner");
-        html.Should().Contain("health-scorecard__grid");
-        html.Should().Contain("health-domain-row");
-        html.Should().NotContain("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
-    }
-
-    [Fact]
-    public void Render_PreRenderedMode_InsertsExecutiveSummaryAfterHealthScorecard()
-    {
-        var serializer = new ReportSerializer();
-        var finding = ClaimFactory.Create(
-            analyzer: "RetentionAnalyzer",
-            category: "Memory",
-            severity: Severity.Warning,
-            title: "Potential retention",
-            narrative: "Object growth observed",
-            recommendation: "Investigate root path",
-            tags: ["memory"],
-            fingerprint: "retention-1");
-
-        var fakeRun = new AnalyzerRunResult(
-            "RetentionAnalyzer",
-            AnalyzerExecutionStatus.Success,
-            TimeSpan.FromMilliseconds(1),
-            new GenericAnalyzerDomainResult(),
-            null,
-            null,
-            Findings: [finding]);
-
-        AnalysisReportDocument doc = serializer.Serialize(
-            "dump.dmp",
-            new[] { fakeRun },
-            TimeSpan.FromSeconds(0.5),
-            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
-            new DefaultSectionBuilderFactory().CreateReportBuilders());
-
-        var renderer = new HtmlReportRenderer();
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: true, StyleVersion: ReportStyleVersion.V1));
-
-        html.Should().Contain("const preRenderedScorecard = reportContent.querySelector('#health-scorecard, .health-scorecard');");
-        html.Should().Contain("reportContent.insertBefore(executive, preRenderedScorecard.nextSibling);");
     }
 
     [Fact]
@@ -302,7 +226,7 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+        string html = renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V2));
 
         html.Should().Contain("function syncCollapsibleAria");
         html.Should().Contain("setAttribute('aria-expanded'");
@@ -369,7 +293,7 @@ public sealed class HtmlRendererCssTests
             new DefaultSectionBuilderFactory().CreateReportBuilders());
 
         var renderer = new HtmlReportRenderer();
-        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+        string html = renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V2));
 
         html.Should().Contain("'data-component-id', 'report-header'");
         html.Should().Contain("'data-component-id', 'health-scorecard'");
@@ -421,9 +345,9 @@ public sealed class HtmlRendererCssTests
 
         var renderer = new HtmlReportRenderer();
 
-        JsonObject reportV1 = ExtractEmbeddedReportPayload(renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V1)));
+        JsonObject reportV1 = ExtractEmbeddedReportPayload(renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V1)));
 
-        JsonObject reportV2 = ExtractEmbeddedReportPayload(renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2)));
+        JsonObject reportV2 = ExtractEmbeddedReportPayload(renderer.Render(doc, new HtmlRenderSettings(StyleVersion: ReportStyleVersion.V2)));
 
         reportV1.Remove("reportStyleVersion");
         reportV2.Remove("reportStyleVersion");

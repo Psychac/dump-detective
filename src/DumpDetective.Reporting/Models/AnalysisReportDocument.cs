@@ -85,8 +85,6 @@ internal abstract record AnalysisReportDocument
     public string SchemaVersion { get; init; } = "2.1";
     // Version for deterministic scoring/ranking semantics used by this report.
     public string? ScoringModelVersion { get; init; } = null;
-    // Rendering contract: "client" for full client render, "prerendered" when server pre-rendered heavy sections.
-    public string RenderMode { get; init; } = "client";
     // Presentation contract: "v1" (default) or "v2" for visual-system renderer behavior.
     public string ReportStyleVersion { get; init; } = "v1";
     public DateTime GeneratedAtUtc { get; init; }

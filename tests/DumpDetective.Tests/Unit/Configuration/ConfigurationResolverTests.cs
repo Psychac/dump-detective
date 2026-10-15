@@ -93,15 +93,13 @@ public sealed class ConfigurationResolverTests
             {
                 DumpPath = null,
                 OutputFormat = ReportFormat.Html,
-                ReportStyleVersion = ReportStyleVersion.V1,
-                PreRender = true
+                ReportStyleVersion = ReportStyleVersion.V1
             };
             ConfigurationResolver resolver = new();
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
             resolved.Report.StyleVersion.Should().Be(ReportStyleVersion.V2);
-            resolved.Report.PreRender.Should().BeTrue();
         }
         finally
         {

@@ -85,36 +85,17 @@ async function bootstrap() {
   const rightRailHost = document.getElementById('report-right-rail');
   if (rightRailHost) rightRailHost.hidden = true;
   document.body.classList.remove('has-right-rail');
-  const renderMode = String((doc && doc.renderMode) || '').toLowerCase();
-  const reportContent = document.getElementById('report-content');
-  const hasPreRenderedContent = renderMode === 'prerendered'
-    || !!(reportContent && reportContent.children && reportContent.children.length > 0);
-  const hasPreRenderedDomains = !!document.getElementById('report-domains');
-
   const headerNode = R.buildHeader(doc);
   if (headerNode) {
     if (main.firstChild) main.insertBefore(headerNode, main.firstChild);
     else main.appendChild(headerNode);
   }
 
-  if (!hasPreRenderedContent) {
-    const scorecard = R.buildHealthScorecard(doc);
-    if (scorecard) main.appendChild(scorecard);
-  }
+  const scorecard = R.buildHealthScorecard(doc);
+  if (scorecard) main.appendChild(scorecard);
 
   const executive = R.buildExecutiveSummary(doc);
-  if (executive) {
-    if (hasPreRenderedContent && reportContent) {
-      const preRenderedScorecard = reportContent.querySelector('#health-scorecard, .health-scorecard');
-      if (preRenderedScorecard && preRenderedScorecard.parentElement === reportContent) {
-        reportContent.insertBefore(executive, preRenderedScorecard.nextSibling);
-      } else {
-        reportContent.insertBefore(executive, reportContent.firstChild);
-      }
-    } else {
-      main.appendChild(executive);
-    }
-  }
+  if (executive) main.appendChild(executive);
 
   const coverageStrip = R.buildCoverageStrip(doc);
   if (coverageStrip) main.appendChild(coverageStrip);
@@ -135,20 +116,15 @@ async function bootstrap() {
   const filterBar = R.buildFilterBar(doc);
   if (filterBar) main.appendChild(filterBar);
 
-  let domains = null;
-  if (!hasPreRenderedDomains) {
-    domains = R.buildDomains(doc);
-    if (domains) main.appendChild(domains);
-  }
+  const domains = R.buildDomains(doc);
+  if (domains) main.appendChild(domains);
 
-  if (!hasPreRenderedDomains) {
-    const crossDomain = R.buildCrossDomainInsights(doc);
-    if (crossDomain) main.appendChild(crossDomain);
-  }
+  const crossDomain = R.buildCrossDomainInsights(doc);
+  if (crossDomain) main.appendChild(crossDomain);
 
   const isTrend = !!doc.isTrendReport || doc['$kind'] === 'trend';
 
-  if (!domains && !hasPreRenderedContent) {
+  if (!domains) {
     const devSec = R.buildDevActionPlan(doc); if (devSec) main.appendChild(devSec);
   }
 
@@ -159,13 +135,13 @@ async function bootstrap() {
 
   UI.buildSidebar(toc, doc);
 
-  if (!domains && !hasPreRenderedContent) {
+  if (!domains) {
     const conf = R.buildConfidenceNotes(doc); if (conf) main.appendChild(conf);
   }
 
   // For trend reports use trendAnalyzerSections (serialized); for single-dump fall back to analyzerSections
   const sections = (isTrend ? (doc.trendAnalyzerSections || []) : (doc.analyzerSections || []));
-  if ((!domains || isTrend) && !hasPreRenderedContent) {
+  if (!domains || isTrend) {
     if (isTrend) {
       R.renderTrendDumpGroups(main, sections, perDumpDocs, doc);
     } else {

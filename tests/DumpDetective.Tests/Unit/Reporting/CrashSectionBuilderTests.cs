@@ -56,6 +56,39 @@ public sealed class CrashSectionBuilderTests
     }
 
     [Fact]
+    public void Build_ManyExceptionTypes_ShipsEveryTypeInBothTables()
+    {
+        var counts = new Dictionary<string, int>();
+        var sizes = new Dictionary<string, ulong>();
+        for (int i = 0; i < 40; i++)
+        {
+            counts[$"Type{i}Exception"] = i + 1;
+            sizes[$"Type{i}Exception"] = (ulong)(i + 1) * 100;
+        }
+
+        var crash = CrashResult(activeExceptions: 0, candidates: []) with { ExceptionTypeCounts = counts, ExceptionHeapSizeByType = sizes };
+
+        var section = _builder.Build(crash);
+
+        section.CompactTables!.Single(t => t.Title == "Exception type counts (all heap)").Rows.Should().HaveCount(40);
+        section.CompactTables!.Single(t => t.Title == "Exception heap size by type").Rows.Should().HaveCount(40);
+    }
+
+    [Fact]
+    public void Build_ManyExceptionTypes_KeepsTheLargestFirst()
+    {
+        var counts = new Dictionary<string, int>();
+        for (int i = 0; i < 20; i++) counts[$"Type{i}Exception"] = i + 1;
+        var crash = CrashResult(activeExceptions: 0, candidates: []) with { ExceptionTypeCounts = counts };
+
+        var section = _builder.Build(crash);
+
+        var rows = section.CompactTables!.Single(t => t.Title == "Exception type counts (all heap)").Rows;
+        rows[0].Values[0].Should().Be("Type19Exception");
+        rows[^1].Values[0].Should().Be("Type0Exception");
+    }
+
+    [Fact]
     public void Build_CandidatesWithTopUserFrameModule_AddsAssemblyAttributionTable()
     {
         var crash = CrashResult(activeExceptions: 4, candidates:

@@ -10,11 +10,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopSignaturesToShow = 5;
-    // Report-width display limits (§9.24 D5) — the analyzer emits complete, uncapped cluster and
-    // sample-thread-ID data; these are render-layer-only slicing constants, not exactness knobs.
-    private const int TopClustersToShow = 12;
-    private const int MaxSampleIdsPerClusterToShow = 8;
 
     public string AnalyzerName => "Thread Stack Signature Clustering";
     public int SortOrder => 110;
@@ -39,7 +34,7 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
         // making text blocks redundant.
         if ((d.TopClusters == null || d.TopClusters.Count == 0) && d.TopClusterSignatures.Count > 0)
         {
-            int sigLimit = Math.Min(d.TopClusterSignatures.Count, TopSignaturesToShow);
+            int sigLimit = d.TopClusterSignatures.Count;
             for (int i = 0; i < sigLimit; i++)
                 blocks.Add(T(FormatHelper.TruncateString(d.TopClusterSignatures[i], 120)));
         }
@@ -53,11 +48,11 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
         // here (§9.24 D5).
         var stackClusters = new List<StackCluster>();
         var clusters = d.TopClusters ?? [];
-        int clusterLimit = Math.Min(clusters.Count, TopClustersToShow);
+        int clusterLimit = clusters.Count;
         for (int i = 0; i < clusterLimit; i++)
         {
             var cluster = clusters[i];
-            int idLimit = Math.Min(cluster.SampleOsThreadIds.Count, MaxSampleIdsPerClusterToShow);
+            int idLimit = cluster.SampleOsThreadIds.Count;
             var osIds = new List<string>(idLimit);
             for (int j = 0; j < idLimit; j++)
                 osIds.Add($"0x{cluster.SampleOsThreadIds[j]:X}");

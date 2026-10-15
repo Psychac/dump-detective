@@ -11,8 +11,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSectionBuilder
 {
-    private const int TopRows = 30;
-
 
     public string SectionId => "C1";
     public string DisplayTitle => "Type Table";
@@ -33,7 +31,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
-            T("Types are ranked by shallow size; retained size remains approximate unless the BFS-backed analysis is present."),
+            T("Type shape and finalizable-type overhead. Retained size remains approximate unless the BFS-backed analysis is present."),
         };
 
         if (memory?.TopTypes is not { Count: > 0 })
@@ -42,60 +40,37 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             return new AnalyzerDetailSection("TypeTable", DisplayTitle, SortOrder, blocks, SectionId, "TypeSystem");
         }
 
-        var rows = new List<TableRow>(Math.Min(memory.TopTypes.Count, TopRows));
+        // Generation profiles by type name, so the scan below is one pass over every type (the first profile of a name wins, as before).
+        var generationByType = new Dictionary<string, TypeGenerationProfile>(StringComparer.Ordinal);
+        if (gcGen?.PerTypeGenerationProfiles is { Count: > 0 })
+        {
+            for (int i = 0; i < gcGen.PerTypeGenerationProfiles.Count; i++)
+                generationByType.TryAdd(gcGen.PerTypeGenerationProfiles[i].TypeName, gcGen.PerTypeGenerationProfiles[i]);
+        }
+
         var finalizableOverheadRows = new List<FinalizableOverheadCandidate>();
-        int limit = Math.Min(memory.TopTypes.Count, TopRows);
-        for (int i = 0; i < limit; i++)
+        for (int i = 0; i < memory.TopTypes.Count; i++)
         {
             TypeSnapshot type = memory.TopTypes[i];
-            TypeShapeProfile? profile = FindShape(shape, type.TypeName);
-            TypeGenerationProfile? gen = FindGeneration(gcGen, type.TypeName);
-            string moduleName = string.IsNullOrWhiteSpace(type.ModuleName) ? "N/A" : type.ModuleName;
+            if (!generationByType.TryGetValue(type.TypeName, out TypeGenerationProfile? gen) || !gen.IsFinalizable)
+                continue;
 
-            rows.Add(Row(
-                Cell(FormatHelper.TruncateString(type.TypeName, 70)),
-                Cell(type.Count.ToString("N0"), type.Count),
-                Cell(FormatBytes(type.TotalBytes), (long)Math.Min(type.TotalBytes, long.MaxValue)),
-                Cell(type.LohBytes > 0 ? FormatBytes(type.LohBytes) : "—"),
-                Cell(type.AverageSize > 0 ? FormatBytes(type.AverageSize) : (type.Count > 0 ? FormatBytes(type.TotalBytes / (ulong)type.Count) : "—")),
-                Cell(type.EstimatedRetainedBytes > 0 ? FormatBytes(type.EstimatedRetainedBytes) : "—"),
-                Cell(gen is null ? "—" : GenPct(gen, 0), gen is null ? null : GenPctValue(gen, 0)),
-                Cell(gen is null ? "—" : GenPct(gen, 1), gen is null ? null : GenPctValue(gen, 1)),
-                Cell(gen is null ? "—" : GenRatio(gen), gen is null ? null : GenRatioValue(gen)),
-                Cell(profile is null ? "—" : profile.IsFinalizable ? "Yes" : "No"),
-                Cell(profile is null ? "—" : profile.IsValueType ? "Yes" : "No"),
-                Cell(profile is null ? "—" : profile.ReferenceFields.ToString("N0"), profile is null ? null : profile.ReferenceFields),
-                Cell(profile is null ? "—" : profile.ReferenceFieldRatio.ToString("F2"), profile is null ? null : profile.ReferenceFieldRatio),
-                Cell(profile is null ? "—" : profile.IsArray ? "Yes" : "No"),
-                Cell(profile is null ? "—" : profile.BaseTypeChainDepth.ToString("N0"), profile is null ? null : profile.BaseTypeChainDepth),
-                Cell(profile is null ? "—" : profile.InterfaceCount.ToString("N0"), profile is null ? null : profile.InterfaceCount),
-                Cell(moduleName),
-                Cell("N/A")));
+            long totalCount = gen.Gen0Count + gen.Gen1Count + gen.Gen2Count + gen.LohCount;
+            if (totalCount <= 0 || gen.TotalBytes <= 0)
+                continue;
 
-            if (gen is not null && gen.IsFinalizable)
+            ulong avgSize = gen.TotalBytes / (ulong)totalCount;
+            ulong estimatedGen2Bytes = (ulong)gen.Gen2Count * avgSize;
+            if (estimatedGen2Bytes > 0)
             {
-                long totalCount = gen.Gen0Count + gen.Gen1Count + gen.Gen2Count + gen.LohCount;
-                if (totalCount > 0 && gen.TotalBytes > 0)
-                {
-                    ulong avgSize = gen.TotalBytes / (ulong)totalCount;
-                    ulong estimatedGen2Bytes = (ulong)gen.Gen2Count * avgSize;
-                    if (estimatedGen2Bytes > 0)
-                    {
-                        finalizableOverheadRows.Add(new FinalizableOverheadCandidate(
-                            type.TypeName,
-                            gen.Gen2Count,
-                            avgSize,
-                            estimatedGen2Bytes,
-                            moduleName));
-                    }
-                }
+                string moduleName = string.IsNullOrWhiteSpace(type.ModuleName) ? "N/A" : type.ModuleName;
+                finalizableOverheadRows.Add(new FinalizableOverheadCandidate(type.TypeName, gen.Gen2Count, avgSize, estimatedGen2Bytes, moduleName));
             }
         }
 
-        compactTables.Add(STCompact(
-            "Type table",
-            new[] { CHType("Type"), CH("Count","number"), CH("Shallow Size","bytes"), CH("LOH Bytes","bytes"), CH("Avg Size","bytes"), CH("Est. Retained","bytes"), CH("Gen0%", "number", "percent"), CH("Gen1%", "number", "percent"), CH("Gen2%", "number", "percent"), CH("Finalizable"), CH("Value Type"), CH("Ref Fields","number"), CH("Ref Ratio", "number", "ratio"), CH("Array"), CH("Base Depth","number"), CH("Interfaces","number"), CHModule("Module"), CH("Method Table") },
-            rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        // Per-type size, generation and shape columns live in Memory Overview ("Top types") and GC Generation ("Per-type generation profiles"); this
+        // section used to repeat the first 30 types with a join of those, which cut the population and repeated six columns.
+        blocks.Add(T("Per-type size, retained size and module are in Memory Overview (Top types); per-type generation counts are in GC Generation Analysis (Per-type generation profiles)."));
 
         if (shape?.TopValueHeavyTypes is { Count: > 0 })
         {
@@ -143,8 +118,6 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 })));
         }
 
-        if (memory.TopTypes.Count > TopRows)
-            blocks.Add(T($"Showing top {TopRows} types by shallow size. {memory.TopTypes.Count - TopRows} additional type(s) omitted."));
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>();
 
@@ -154,7 +127,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             blocks.Add(T("Estimated as Gen2 count multiplied by average shallow size for the finalizable types present in the current type table."));
 
             finalizableOverheadRows.Sort(static (a, b) => b.EstimatedGen2Bytes.CompareTo(a.EstimatedGen2Bytes));
-            int finalizableLimit = Math.Min(finalizableOverheadRows.Count, 10);
+            int finalizableLimit = finalizableOverheadRows.Count;
             var overheadRows = new List<TableRow>(finalizableLimit);
             ulong totalEstimatedBytes = 0;
             for (int i = 0; i < finalizableLimit; i++)
@@ -175,70 +148,16 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 new[] { CHType("Type"), CH("Gen2 Count","number"), CH("Avg Size","bytes"), CH("Est. Gen2 Bytes","bytes"), CHModule("Module") },
                 overheadRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
-            if (finalizableOverheadRows.Count > finalizableLimit)
-                blocks.Add(T($"Showing top {finalizableLimit} finalizable type(s). {finalizableOverheadRows.Count - finalizableLimit} additional type(s) omitted."));
         }
 
         blocks.Add(H("TYPE SHAPE NOTES"));
-        blocks.Add(T("Balanced shapes are surfaced as Mixed; arrays are flagged explicitly in the type table."));
+        blocks.Add(T("Balanced shapes are surfaced as Mixed; arrays are flagged explicitly in the value-heavy types table."));
 
         return new AnalyzerDetailSection(
             "TypeTable", DisplayTitle, SortOrder, blocks, SectionId, "TypeSystem",
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
-
-    private static TypeShapeProfile? FindShape(ObjectShapeAnalyzerDomainResult? shape, string typeName)
-    {
-        if (shape is null)
-            return null;
-
-        for (int i = 0; i < shape.TopReferenceHeavyTypes.Count; i++)
-            if (string.Equals(shape.TopReferenceHeavyTypes[i].TypeName, typeName, StringComparison.Ordinal))
-                return shape.TopReferenceHeavyTypes[i];
-
-        for (int i = 0; i < shape.TopValueHeavyTypes.Count; i++)
-            if (string.Equals(shape.TopValueHeavyTypes[i].TypeName, typeName, StringComparison.Ordinal))
-                return shape.TopValueHeavyTypes[i];
-
-        return null;
-    }
-
-    private static TypeGenerationProfile? FindGeneration(GCGenerationDomainResult? gcGen, string typeName)
-    {
-        if (gcGen?.PerTypeGenerationProfiles is not { Count: > 0 })
-            return null;
-
-        for (int i = 0; i < gcGen.PerTypeGenerationProfiles.Count; i++)
-            if (string.Equals(gcGen.PerTypeGenerationProfiles[i].TypeName, typeName, StringComparison.Ordinal))
-                return gcGen.PerTypeGenerationProfiles[i];
-
-        return null;
-    }
-
-    private static double GenRatioValue(TypeGenerationProfile profile)
-    {
-        long total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count;
-        if (total == 0)
-            return 0.0;
-
-        return profile.Gen2Count * 100.0 / total;
-    }
-
-    private static string GenRatio(TypeGenerationProfile profile)
-        => $"{GenRatioValue(profile):F1}%";
-
-    private static double GenPctValue(TypeGenerationProfile profile, int gen)
-    {
-        long total = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count + profile.LohCount;
-        if (total == 0)
-            return 0.0;
-        long count = gen == 0 ? profile.Gen0Count : gen == 1 ? profile.Gen1Count : profile.Gen2Count;
-        return count * 100.0 / total;
-    }
-
-    private static string GenPct(TypeGenerationProfile profile, int gen)
-        => $"{GenPctValue(profile, gen):F1}%";
 
     private sealed record FinalizableOverheadCandidate(
         string TypeName,

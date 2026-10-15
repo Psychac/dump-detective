@@ -387,7 +387,7 @@ public sealed class ReportingCompositionTests
         });
 
         output.Should().Contain("Demo.Type");
-        output.Should().Contain("Type table");
+        output.Should().NotContain("Type table");
     }
 
     [Fact]

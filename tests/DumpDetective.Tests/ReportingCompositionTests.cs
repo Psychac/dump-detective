@@ -376,7 +376,7 @@ public sealed class ReportingCompositionTests
         AnalyzerDetailSection section = builder.Build(resultSet);
         section.SectionId.Should().Be("C1");
         section.Domain.Should().Be("TypeSystem");
-        section.DisplayTitle.Should().Be("Type Table");
+        section.DisplayTitle.Should().Be("Type Shape and Finalizable Overhead");
 
         string output = new MarkdownCanonicalReportFormatter().Render(new SingleDumpReportDocument
         {

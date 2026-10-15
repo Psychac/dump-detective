@@ -13,7 +13,7 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 {
 
     public string SectionId => "C1";
-    public string DisplayTitle => "Type Table";
+    public string DisplayTitle => "Type Shape and Finalizable Overhead";
     public int SortOrder => 100;
 
     public bool CanBuild(AnalyzerResultSet results)

@@ -370,7 +370,7 @@ export function buildAnalyzerSection(section, i) {
         const values = Array.isArray(r.values) ? r.values : (Array.isArray(r) ? r : []);
         return resolvePooledRow(values, headerMeta);
       }) : [];
-      return { title: ct.title, headers: headers, headerMeta: headerMeta, rows: rows, rowLimit: ct.rowLimit };
+      return { title: ct.title, headers: headers, headerMeta: headerMeta, rows: rows, rowLimit: ct.rowLimit, totalRows: ct.totalRows, sampled: !!ct.sampled };
     }) : [];
     if (sectionTables && sectionTables.length) {
       for (let ti = 0; ti < sectionTables.length; ti++) {
@@ -381,7 +381,7 @@ export function buildAnalyzerSection(section, i) {
         tblDetails.setAttribute('data-collapsible', 'table');
         const tblSummary = el('summary', 'table-collapse__summary');
         const limit = tbl.rowLimit || 20;
-        tblSummary.textContent = honestTableTitle(tbl.title || 'Table', rowCount) + ' \u2014 ' + rowCount + ' row' + (rowCount !== 1 ? 's' : '');
+        tblSummary.textContent = honestTableTitle(tbl.title || 'Table', rowCount, tbl.totalRows) + ' \u2014 ' + tableRowCountText(rowCount, tbl.totalRows, tbl.sampled);
         tblDetails.appendChild(tblSummary);
         if (tbl.headers && tbl.headers.length) {
           const tableId = 'detail-table-' + sectionIndexKey + '-' + ti;
@@ -1050,10 +1050,21 @@ export function buildAnalyzerSection(section, i) {
 // A table whose title says "Top ..." but which shipped far more rows than any top-N list does should not claim to be one. A table over the lazy-row
 // threshold (the same 180 rows the viewer pages from data) loses the word; the analyzer-side caps found in the 2026-10-13 audit are all below it, so
 // a capped list keeps its "Top". The row count beside the title states how many rows there are either way.
-function honestTableTitle(title, rowCount) {
-  if (rowCount <= 180 || !/^Top\s+\S/.test(title)) return title;
+function honestTableTitle(title, rowCount, totalRows) {
+  // A table that reports its own total is labelled by it, not by size: a list cut to N of M is a top-N list, and a complete one is not.
+  if (totalRows != null) {
+    if (totalRows > rowCount || !/^Top\s+\S/.test(title)) return title;
+  } else if (rowCount <= 180 || !/^Top\s+\S/.test(title)) return title;
   const rest = title.replace(/^Top\s+/, '');
   return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
+// "N rows", "N of M shown" when the analyzer cut the list, "N sampled from M" when the rows are a sample of a larger population.
+function tableRowCountText(rowCount, totalRows, sampled) {
+  const rows = rowCount.toLocaleString('en-US') + ' row' + (rowCount !== 1 ? 's' : '');
+  if (totalRows == null || totalRows <= rowCount) return rows;
+  const total = totalRows.toLocaleString('en-US');
+  return rowCount.toLocaleString('en-US') + (sampled ? ' sampled from ' : ' of ') + total + (sampled ? '' : ' shown');
 }
 
 // What a table cell shows and sorts by. A numeric column shows its value compactly (bytes, percent); anything else shows its text.

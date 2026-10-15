@@ -436,6 +436,14 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                     Rows: table.Rows.Take(printed).Select(r => new TableRow(r.Values.Select(v => new TableCell(v?.ToString() ?? string.Empty)).ToArray())).ToArray()),
                 sb);
 
+            if (table.TotalRows is { } total && total > table.Rows.Count)
+            {
+                sb.AppendLine(table.Sampled
+                    ? $"*{table.Rows.Count:N0} rows sampled from {total:N0}.*"
+                    : $"*{table.Rows.Count:N0} of {total:N0} shown.*");
+                sb.AppendLine();
+            }
+
             if (printed < table.Rows.Count)
             {
                 sb.AppendLine($"*Showing {printed:N0} of {table.Rows.Count:N0} rows; the full table is in the HTML and JSON reports.*");

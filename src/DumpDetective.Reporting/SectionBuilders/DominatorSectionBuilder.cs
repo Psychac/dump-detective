@@ -271,6 +271,11 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
         if (nextSteps is not null)
             blocks.Add(nextSteps);
 
+        // Both lists were cut to the top N after ranking every candidate; the analyzer reports how many there were.
+        SetTotalRows(compactTables, "Top dominator suspects by retained bytes", d.CandidateCount);
+        SetTotalRows(compactTables, "Dominator impact per-mille (of total estimated retained)", d.CandidateCount);
+        SetTotalRows(compactTables, "Highly referenced objects", d.HighlyReferencedObjectCount);
+
         return new AnalyzerDetailSection(
             AnalyzerName: "Dominator Analysis",
             DisplayTitle: DisplayTitle,

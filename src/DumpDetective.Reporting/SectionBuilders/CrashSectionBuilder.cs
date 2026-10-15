@@ -300,6 +300,11 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
             ? "Frame origin classification is approximate because module data was unavailable."
             : "Frames can be classified as FrameworkCode, ThirdParty, or UserCode by module prefix and module inventory."));
 
+        // Instances are kept per exception type (a fixed number each, plus every active one) and buckets are built from those, so both are samples of
+        // the heap's exceptions, not the first rows of a full ranking.
+        SetTotalRows(compactTables, "Exception instances", crash.TotalExceptions, sampled: true);
+        SetTotalRows(compactTables, "Crash buckets (exception type + top user frame)", crash.TotalExceptions, sampled: true);
+
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             LeadFinding: leadFinding,

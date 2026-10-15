@@ -105,6 +105,18 @@ internal abstract class SectionBuilderBase
     protected static CompactTable STCompact(string title, IReadOnlyList<CompactHeader> headers, IReadOnlyList<CompactRow> rows, int rowLimit = 20)
         => new(title, headers, rows, rowLimit);
 
+    /// <summary>
+    /// Records on a table already added to <paramref name="tables"/> how many rows its population really has, so the viewer can say "N of M shown"
+    /// (<paramref name="sampled"/> false: the list was cut) or "N sampled from M" (true: the rows are a sample, not the first N of a ranking).
+    /// Only call it with a total the analyzer reported; a table with no known total keeps none.
+    /// </summary>
+    protected static void SetTotalRows(List<CompactTable> tables, string title, int total, bool sampled = false)
+    {
+        int index = tables.FindIndex(table => table.Title == title);
+        if (index >= 0)
+            tables[index] = tables[index] with { TotalRows = total, Sampled = sampled };
+    }
+
     // ── Typed contract-slot helpers ───────────────────────────────────────────
 
     /// <summary>Creates a key metric for the always-visible KPI strip.</summary>

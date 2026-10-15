@@ -157,6 +157,34 @@ public sealed class CrashSectionBuilderTests
         section.CompactTables!.Should().NotContain(t => t.Title == "Gen2/LOH exception retention paths");
     }
 
+    [Fact]
+    public void Build_ExceptionInstancesAndBuckets_AreMarkedAsSamplesOfTheHeapTotal()
+    {
+        var crash = CrashResult(activeExceptions: 0, candidates: []) with
+        {
+            TotalExceptions = 5_000,
+            TopExceptionInstances = [new ExceptionInstanceSnapshot("FooException", 0x10, "m", null, null, 0, false, null, null, null, null)],
+            CrashBuckets = [new CrashBucket("FooException", "App.Do", 1, 0, 0x10)],
+        };
+
+        var section = _builder.Build(crash);
+
+        var instances = section.CompactTables!.Single(t => t.Title == "Exception instances");
+        instances.TotalRows.Should().Be(5_000);
+        instances.Sampled.Should().BeTrue();
+        var buckets = section.CompactTables!.Single(t => t.Title == "Crash buckets (exception type + top user frame)");
+        buckets.TotalRows.Should().Be(5_000);
+        buckets.Sampled.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Build_ExceptionTypeTables_ReportNoTotalBecauseTheyAreComplete()
+    {
+        var section = _builder.Build(CrashResult(activeExceptions: 0, candidates: []));
+
+        section.CompactTables!.Single(t => t.Title == "Exception type counts (all heap)").TotalRows.Should().BeNull();
+    }
+
     private static CrashDomainResult CrashResult(int activeExceptions, IReadOnlyList<CrashThreadCandidateSnapshot> candidates) => new(
         TotalExceptions: activeExceptions + 10,
         ActiveExceptions: activeExceptions,

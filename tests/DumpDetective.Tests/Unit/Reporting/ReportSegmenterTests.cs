@@ -203,4 +203,26 @@ public sealed class ReportSegmenterTests
         cols[0].GetProperty("values")[0][1].GetString().Should().Be("Exact.Name");
         cols[1].GetProperty("values")[0].GetDouble().Should().Be(83.112);
     }
+
+    [Fact]
+    public void Segment_LargeTableWithATotal_KeepsTheTotalAndSampledFlagOnItsStub()
+    {
+        CompactTable big = TableOfRows("Large", ReportSegmenter.LazyTableRowThreshold + 1) with { TotalRows = 9_999, Sampled = true };
+
+        SegmentedReport segmented = ReportSegmenter.Segment(Document(Section("A1", big)));
+
+        JsonElement stub = Parse(segmented.Segments.Single(segment => segment.Id == "s-A1")).GetProperty("compactTables")[0];
+        stub.GetProperty("totalRows").GetInt32().Should().Be(9_999);
+        stub.GetProperty("sampled").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public void Segment_TableWithoutATotal_WritesNeitherField()
+    {
+        SegmentedReport segmented = ReportSegmenter.Segment(Document(Section("A1", TableOfRows("Small", 3))));
+
+        JsonElement table = Parse(segmented.Segments.Single(segment => segment.Id == "s-A1")).GetProperty("compactTables")[0];
+        table.TryGetProperty("totalRows", out _).Should().BeFalse();
+        table.TryGetProperty("sampled", out _).Should().BeFalse();
+    }
 }

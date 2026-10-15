@@ -71,7 +71,9 @@ internal sealed record CompactTable(
     IReadOnlyList<CompactRow> Rows,
     int RowLimit = 20,
     int? RowCount = null,
-    string? SegmentId = null);   // Set with RowCount when the rows ship as a lazy table segment and Rows is empty (ReportSegmenter)
+    string? SegmentId = null,
+    int? TotalRows = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)] bool Sampled = false);   // Set with RowCount when the rows ship as a lazy table segment and Rows is empty (ReportSegmenter)
 
 internal static class CompactTableExtensions
 {

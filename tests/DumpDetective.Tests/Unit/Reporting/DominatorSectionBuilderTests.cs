@@ -50,6 +50,23 @@ public sealed class DominatorSectionBuilderTests
             CrossTypeOverlapInstanceScanCapped: crossTypeOverlapInstanceScanCapped,
             RootChainsByTypeName: rootChainsByType);
 
+    [Fact]
+    public void Build_ListsCutToTopN_CarryTheAnalyzersTotals()
+    {
+        DominatorDomainResult result = BuildResult(exactByType: null) with
+        {
+            CandidateCount = 800,
+            HighlyReferencedObjectCount = 4_200,
+            TopHighlyReferencedObjects = [new HighlyReferencedObjectSnapshot(0x10, "App.Hub", 64, 9_000)],
+        };
+
+        AnalyzerDetailSection section = new DominatorSectionBuilder().Build(result);
+
+        section.CompactTables!.Single(t => t.Title == "Top dominator suspects by retained bytes").TotalRows.Should().Be(800);
+        section.CompactTables!.Single(t => t.Title == "Highly referenced objects").TotalRows.Should().Be(4_200);
+        section.CompactTables!.Single(t => t.Title == "Highly referenced objects").Sampled.Should().BeFalse();
+    }
+
     private static CompactTable GetGen2LohTable(AnalyzerDetailSection section) =>
         section.CompactTables!.Single(t => t.Title == "Gen2 / LOH dominator suspects");
 

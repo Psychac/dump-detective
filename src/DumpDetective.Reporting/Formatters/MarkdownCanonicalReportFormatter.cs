@@ -428,14 +428,24 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
         for (int i = 0; i < tables.Count; i++)
         {
             CompactTable table = tables[i];
+            int printed = Math.Min(table.Rows.Count, MaxCompactTableRowsPrinted);
             RenderTableMd(
                 new TableBlock(
                     Caption: table.Title,
                     Headers: table.Headers.Select(h => h.Name).ToArray(),
-                    Rows: table.Rows.Select(r => new TableRow(r.Values.Select(v => new TableCell(v?.ToString() ?? string.Empty)).ToArray())).ToArray()),
+                    Rows: table.Rows.Take(printed).Select(r => new TableRow(r.Values.Select(v => new TableCell(v?.ToString() ?? string.Empty)).ToArray())).ToArray()),
                 sb);
+
+            if (printed < table.Rows.Count)
+            {
+                sb.AppendLine($"*Showing {printed:N0} of {table.Rows.Count:N0} rows; the full table is in the HTML and JSON reports.*");
+                sb.AppendLine();
+            }
         }
     }
+
+    // Tables are no longer cut where the report is built, and a Markdown table of tens of thousands of rows is not readable; the HTML and JSON reports carry every row.
+    private const int MaxCompactTableRowsPrinted = 100;
 
     private static string Esc(string s) => s.Replace("|", "\\|");
 }

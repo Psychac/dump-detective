@@ -4,7 +4,7 @@ DumpDetective report and snapshot formats use a simple semantic contract.
 
 ## Current schema version
 
-- Report schema: `2.1`
+- Report schema: `3.0`
 
 ## Compatibility rules
 

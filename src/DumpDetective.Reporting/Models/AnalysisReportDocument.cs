@@ -82,7 +82,7 @@ internal sealed record HealthScorecard(
 [JsonDerivedType(typeof(TrendReportDocument), typeDiscriminator: "trend")]
 internal abstract record AnalysisReportDocument
 {
-    public string SchemaVersion { get; init; } = "2.1";
+    public string SchemaVersion { get; init; } = "3.0";
     // Version for deterministic scoring/ranking semantics used by this report.
     public string? ScoringModelVersion { get; init; } = null;
     // Presentation contract: "v1" (default) or "v2" for visual-system renderer behavior.
@@ -121,6 +121,12 @@ internal abstract record AnalysisReportDocument
     /// pairs that share a table row are added when the document is rendered, from the rewritten tables (see <c>EntityCellPass</c>).
     /// </summary>
     public EntityRelations? Relations { get; init; } = null;
+
+    /// <summary>
+    /// The observation ids the findings cite, each written once; set only when <c>report.json</c> is written, where a finding's
+    /// citations are positions in this table. Null in every other format, which carries no lineage.
+    /// </summary>
+    public LineageTable? Lineage { get; init; } = null;
 
     /// <summary>
     /// Cross-table string pool for compact-table cells (docs/refactor/report-payload-size-reduction-design.md,

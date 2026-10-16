@@ -72,7 +72,7 @@ public sealed class ReportJsonLayoutTests
     [Fact]
     public void IndentedOutput_IsTheSameDocumentAsTheCompactOutput()
     {
-        SingleDumpReportDocument document = Document();
+        SingleDumpReportDocument document = Document() with { Domains = [Document().Domains![0] with { DomainInsights = [] }] };
 
         Normalized(Indented(document)).Should().Be(Normalized(Compact(document)));
     }
@@ -102,13 +102,57 @@ public sealed class ReportJsonLayoutTests
     }
 
     [Fact]
-    public void EveryObservationIdListIsOneLine()
+    public void EveryCitationIsAPositionInTheLineageTable()
     {
-        string json = Indented(Document());
+        JsonElement root = JsonDocument.Parse(Indented(Document())).RootElement;
+        JsonElement finding = root.GetProperty("domains")[0].GetProperty("domainInsights")[0];
 
-        Regex.Matches(json, "\"derivedFrom\": \\[(\"[0-9a-f]{32}\",?){50}\\]").Should().HaveCount(1);
-        Regex.Matches(json, "\"observations\": \\[(\"[0-9a-f]{32}\",?){50}\\]").Should().HaveCount(1);
-        Regex.Matches(json, "\"observations\": \\[(\"[0-9a-f]{32}\",?){3}\\]").Should().HaveCount(1);
+        finding.GetProperty("derivedFrom").GetInt32().Should().Be(0);
+        finding.GetProperty("support")[0].GetProperty("observations").GetInt32().Should().Be(0);
+        finding.GetProperty("counter").GetProperty("statements")[0].GetProperty("observations").GetInt32().Should().Be(1);
+
+        JsonElement lineage = root.GetProperty("lineage");
+        lineage.GetProperty("ids").GetArrayLength().Should().Be(50);
+        lineage.GetProperty("ids")[7].GetString().Should().Be(Ids[7].Value.ToString("N"));
+        lineage.GetProperty("lists").GetArrayLength().Should().Be(2);
+        lineage.GetProperty("lists")[0].EnumerateArray().Select(e => e.GetInt32()).Should().Equal(Enumerable.Range(0, 50));
+        lineage.GetProperty("lists")[1].EnumerateArray().Select(e => e.GetInt32()).Should().Equal(0, 1, 2);
+    }
+
+    [Fact]
+    public void ListsWithTheSameIdsShareOneEntryWhateverTheirInstance()
+    {
+        var finding = new FindingRecord("f", "A", "C", "Info", "T", null, "R", [])
+        {
+            DerivedFrom = Ids.Take(5).ToArray(),
+            Support = [new EvidenceStatement(Ids.Take(5).ToArray(), "same ids, other array")],
+        };
+        var document = new SingleDumpReportDocument { DumpPath = "x", Domains = [new ReportDomainSection("Memory", null, [], [finding])] };
+
+        JsonElement root = JsonDocument.Parse(Indented(document)).RootElement;
+
+        root.GetProperty("lineage").GetProperty("lists").GetArrayLength().Should().Be(1);
+        root.GetProperty("lineage").GetProperty("ids").GetArrayLength().Should().Be(5);
+    }
+
+    [Fact]
+    public void TheLineageTableIsWrittenIdsThirtyTwoToALineAndEachListOnOneLine()
+    {
+        string[] lines = Indented(Document()).Split('\n');
+        int idsKey = Array.FindIndex(lines, line => line.TrimStart().StartsWith("\"ids\": [", StringComparison.Ordinal));
+
+        idsKey.Should().BeGreaterThan(0);
+        Regex.IsMatch(lines[idsKey + 1].Trim(), "^(\"[0-9a-f]{32}\",?){32}$").Should().BeTrue();
+        Regex.IsMatch(lines[idsKey + 2].Trim(), "^(\"[0-9a-f]{32}\",?){18}$").Should().BeTrue();
+        lines.Should().Contain(line => line.Trim() == "[0,1,2]");
+    }
+
+    [Fact]
+    public void ADocumentWithNoCitationsHasNoLineageTable()
+    {
+        var document = new SingleDumpReportDocument { DumpPath = "x", Domains = [new ReportDomainSection("Memory", null, [], [])] };
+
+        Indented(document).Should().NotContain("\"lineage\"");
     }
 
     [Fact]
@@ -152,7 +196,7 @@ public sealed class ReportJsonLayoutTests
     }
 
     [Fact]
-    public void AnEmptyAndANullIdListStillSerialize()
+    public void AnEmptyIdListIsAnEmptyListInTheTable()
     {
         var finding = new FindingRecord("f", "A", "C", "Info", "T", null, "R", [])
         {
@@ -163,19 +207,9 @@ public sealed class ReportJsonLayoutTests
 
         string json = Indented(document);
 
-        json.Should().Contain("\"derivedFrom\": []");
-        Normalized(json).Should().Be(Normalized(Compact(document)));
-    }
-
-    [Fact]
-    public void AnObservationIdListReadsBackWhatItWrote()
-    {
-        var options = new JsonSerializerOptions(ReportJsonContext.Default.Options) { WriteIndented = true };
-        EvidenceStatement statement = new(Ids.Take(5).ToArray(), "why");
-
-        string json = JsonSerializer.Serialize(statement, options);
-        EvidenceStatement? back = JsonSerializer.Deserialize<EvidenceStatement>(json, options);
-
-        back!.Observations.Should().Equal(statement.Observations);
+        JsonElement lineage = JsonDocument.Parse(json).RootElement.GetProperty("lineage");
+        lineage.GetProperty("ids").GetArrayLength().Should().Be(0);
+        lineage.GetProperty("lists").GetArrayLength().Should().Be(1);
+        lineage.GetProperty("lists")[0].GetArrayLength().Should().Be(0);
     }
 }

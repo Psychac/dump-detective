@@ -67,7 +67,7 @@ public sealed class ReportDocumentSchemaTests
         AnalysisReportDocument? restored = JsonSerializer.Deserialize(json, ReportJsonContext.Default.AnalysisReportDocument);
 
         restored.Should().NotBeNull();
-        restored!.SchemaVersion.Should().Be("2.1");
+        restored!.SchemaVersion.Should().Be("3.0");
         restored.ScoringModelVersion.Should().Be("v1");
         restored.ElapsedSeconds.Should().BeApproximately(42.5, 0.001);
         restored.Should().BeOfType<SingleDumpReportDocument>();

@@ -190,7 +190,7 @@ public sealed class ReportingCompositionTests
             analyzerBuilders: [],
             reportBuilders: []);
 
-        doc.SchemaVersion.Should().Be("2.1");
+        doc.SchemaVersion.Should().Be("3.0");
     }
 
     [Fact]

@@ -27,11 +27,20 @@ internal sealed class CompactRowJsonConverter : JsonConverter<CompactRow>
                 JsonTokenType.True => true,
                 JsonTokenType.False => false,
                 JsonTokenType.Null => null,
-                JsonTokenType.StartObject => JsonSerializer.Deserialize<DumpDetective.Reporting.Models.UnknownCell>(ref reader, options),
+                JsonTokenType.StartObject => ReadObjectCell(ref reader, options),
                 _ => throw new JsonException($"Unexpected token {reader.TokenType} in CompactRow."),
             });
         }
         return new CompactRow(values.ToArray());
+    }
+
+    // An object cell is either an unknown-cell marker ({"u":...}) or a text-and-sort-value record ({"display":...}).
+    private static object? ReadObjectCell(ref Utf8JsonReader reader, JsonSerializerOptions options)
+    {
+        using JsonDocument cell = JsonDocument.ParseValue(ref reader);
+        return cell.RootElement.TryGetProperty("u", out _)
+            ? cell.RootElement.Deserialize<DumpDetective.Reporting.Models.UnknownCell>(options)
+            : cell.RootElement.Deserialize<DumpDetective.Reporting.Models.TableCell>(options);
     }
 
     public override void Write(Utf8JsonWriter writer, CompactRow value, JsonSerializerOptions options)

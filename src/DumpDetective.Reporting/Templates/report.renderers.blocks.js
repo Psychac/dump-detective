@@ -3,7 +3,8 @@
 // it is available via hoisting. In ES module mode it would need a separate import.
 import { el, t, wrapAddresses, indentClass } from './report.dom.js';
 
-export function renderBlocks(blocks, container, announce) {
+// options.renderTableRef(index) returns the element for the section's compact table at that index (a "tableRef" block), or null.
+export function renderBlocks(blocks, container, announce, options) {
   if (!blocks || !blocks.length) return;
   const stack = [container];
   if (container && !container._headingCounter) container._headingCounter = 0;
@@ -103,6 +104,11 @@ export function renderBlocks(blocks, container, announce) {
       }
       case 'table': {
         top.appendChild(buildDetailTable(block, announce, sparkRegistry));
+        break;
+      }
+      case 'tableRef': {
+        const referenced = options && options.renderTableRef ? options.renderTableRef(block.tableIndex) : null;
+        if (referenced) top.appendChild(referenced);
         break;
       }
       case 'sparkline': {
@@ -285,28 +291,7 @@ export function buildDetailTable(block, announce, sparkRegistry) {
       }
       if (rawVal != null) td.dataset.value = String(rawVal);
 
-      if (isTimelineTable) {
-        if (ci === 0) td.classList.add('timeline-metric-cell');
-        if (ci === 1) td.classList.add('timeline-trend-cell');
-        if (ci >= 2 && ci <= cells.length - 5) {
-          td.classList.add('timeline-num-cell');
-          td.classList.add('timeline-dump-cell');
-        }
-        if (ci === cells.length - 4 || ci === cells.length - 3) {
-          td.classList.add('timeline-num-cell');
-        }
-        if (ci === cells.length - 2) {
-          td.classList.add('timeline-pattern-cell');
-        }
-        if (ci === cells.length - 1) {
-          const s = (td.textContent || '').toLowerCase();
-          td.classList.add('timeline-status-cell');
-          if (s.includes('severe')) td.classList.add('timeline-status-cell--severe');
-          else if (s.includes('regression')) td.classList.add('timeline-status-cell--regression');
-          else if (s.includes('improvement')) td.classList.add('timeline-status-cell--improvement');
-          else td.classList.add('timeline-status-cell--stable');
-        }
-      }
+      if (isTimelineTable) styleTimelineCell(td, ci, cells.length);
 
       wrapAddresses(td);
       tr.appendChild(td);
@@ -354,7 +339,32 @@ export function buildDetailTable(block, announce, sparkRegistry) {
   return container;
 }
 
-function applyTimelineRowVisualEncoding(tr, totalCells) {
+// The class a timeline table gives each of its cells, by column: metric, trend, one per dump, the two deltas, pattern, and status coloured by severity.
+// Shared by the legacy table block and the compact table that replaced it, so the two look the same.
+export function styleTimelineCell(td, ci, cellCount) {
+        if (ci === 0) td.classList.add('timeline-metric-cell');
+        if (ci === 1) td.classList.add('timeline-trend-cell');
+        if (ci >= 2 && ci <= cellCount - 5) {
+          td.classList.add('timeline-num-cell');
+          td.classList.add('timeline-dump-cell');
+        }
+        if (ci === cellCount - 4 || ci === cellCount - 3) {
+          td.classList.add('timeline-num-cell');
+        }
+        if (ci === cellCount - 2) {
+          td.classList.add('timeline-pattern-cell');
+        }
+        if (ci === cellCount - 1) {
+          const s = (td.textContent || '').toLowerCase();
+          td.classList.add('timeline-status-cell');
+          if (s.includes('severe')) td.classList.add('timeline-status-cell--severe');
+          else if (s.includes('regression')) td.classList.add('timeline-status-cell--regression');
+          else if (s.includes('improvement')) td.classList.add('timeline-status-cell--improvement');
+          else td.classList.add('timeline-status-cell--stable');
+        }
+}
+
+export function applyTimelineRowVisualEncoding(tr, totalCells) {
   const dumpStart = 2;
   const dumpEnd = totalCells - 5;
   if (dumpEnd < dumpStart) return;

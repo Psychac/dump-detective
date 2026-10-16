@@ -278,6 +278,7 @@ internal sealed record AnalyzerDetailSection(
 [JsonDerivedType(typeof(ListItemBlock), "listItem")]
 [JsonDerivedType(typeof(DividerBlock), "divider")]
 [JsonDerivedType(typeof(BlankBlock), "blank")]
+[JsonDerivedType(typeof(CompactTableRefBlock), "tableRef")]
 [JsonDerivedType(typeof(TableBlock), "table")]
 [JsonDerivedType(typeof(ChartBlock), "chart")]
 [JsonDerivedType(typeof(ConfidenceBandBlock), "confidenceBand")]
@@ -296,6 +297,13 @@ internal sealed record TextBlock(string Text, int IndentLevel = 0) : SectionBloc
 internal sealed record ListItemBlock(string Text, int IndentLevel = 0) : SectionBlock;
 internal sealed record DividerBlock : SectionBlock;
 internal sealed record BlankBlock : SectionBlock;
+
+/// <summary>
+/// A place in a section's narrative where one of the section's <see cref="AnalyzerDetailSection.CompactTables"/> is drawn, by index. Without it
+/// compact tables follow all the narrative blocks; a section whose tables belong between its headings (the trend metric timeline) uses this to
+/// keep that order while still getting the column store, paging and lazy rows of a compact table. The viewer does not draw a referenced table twice.
+/// </summary>
+internal sealed record CompactTableRefBlock(int TableIndex) : SectionBlock;
 
 internal sealed record TableBlock(
     string? Caption,

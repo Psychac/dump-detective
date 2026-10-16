@@ -12,6 +12,7 @@ import { confidenceSlots } from './report.renderers.shared.js';
 import { loadSectionSegment, loadEntities } from './report.segments.js';
 import { attachPagedTable } from './report.ui.tables.js';
 import { renderSparklines, renderCharts } from './report.renderers.charts.js';
+import { styleTimelineCell, applyTimelineRowVisualEncoding } from './report.renderers.blocks.js';
 
 // Resolves pooled-string cells (see report.renderers.shared.js) back to their literal value.
 // Only non-numeric columns can contain pooled indices — the producer never pools a cell in a
@@ -359,14 +360,13 @@ export function buildAnalyzerSection(section, i) {
 
   // Narrative blocks from blocks.js. A lazy section whose table blocks arrive without rows builds them with the rest of its body, after its
   // segment has loaded (see loadSectionSegment).
-  const blocksWaitForSegment = !!section.segmentId && blocks.some(function (b) { return b && b.type === 'table' && (!b.rows || !b.rows.length); });
+  const blocksWaitForSegment = blocks.some(function (b) { return b && b.type === 'tableRef'; })
+    || (!!section.segmentId && blocks.some(function (b) { return b && b.type === 'table' && (!b.rows || !b.rows.length); }));
   if (!blocksWaitForSegment) renderBlocks(blocks, content);
 
   // Everything below the narrative blocks (tables and typed slots) is built by this function: at once for a section whose content is in the
   // core, or after its segment has loaded for a section whose content ships as a lazy segment (docs/ReportStructure/m4-payload-plan.md, D11).
   function renderSectionBody() {
-    if (blocksWaitForSegment) renderBlocks(section.blocks || [], content);
-
     // ── Typed section tables (collapsed by default) ──────────────────────────
     const sectionTables = Array.isArray(section.compactTables) ? section.compactTables.map(function (ct) {
       const headers = Array.isArray(ct.headers) ? ct.headers.map(function (h) { return (h && h.name) ? String(h.name) : String(h || ''); }) : [];
@@ -377,179 +377,195 @@ export function buildAnalyzerSection(section, i) {
       }) : [];
       return { title: ct.title, headers: headers, headerMeta: headerMeta, rows: rows, rowLimit: ct.rowLimit, totalRows: ct.totalRows, sampled: !!ct.sampled };
     }) : [];
-    if (sectionTables && sectionTables.length) {
-      for (let ti = 0; ti < sectionTables.length; ti++) {
-        const tbl = sectionTables[ti];
-        const rowCount = tbl.rows ? tbl.rows.length : 0;
-        if (rowCount === 0) continue;
-        const tblDetails = el('details', 'table-collapse');
-        tblDetails.setAttribute('data-collapsible', 'table');
-        const tblSummary = el('summary', 'table-collapse__summary');
-        const limit = tbl.rowLimit || 20;
-        tblSummary.textContent = honestTableTitle(tbl.title || 'Table', rowCount, tbl.totalRows) + ' \u2014 ' + tableRowCountText(rowCount, tbl.totalRows, tbl.sampled);
-        tblDetails.appendChild(tblSummary);
-        if (tbl.headers && tbl.headers.length) {
-          const tableId = 'detail-table-' + sectionIndexKey + '-' + ti;
-          const shouldLazyHydrate = rowCount > 180;
-          const tools = el('div', 'table-tools');
-          const search = document.createElement('input');
-          search.type = 'search';
-          search.className = 'table-filter-input';
-          search.placeholder = 'Filter table rows...';
-          search.setAttribute('aria-label', 'Filter table rows');
-          search.setAttribute('data-target-table', tableId);
-          tools.appendChild(search);
+    // Each compact table is built by this function: where a tableRef block puts it, otherwise after the narrative blocks. A table is built once.
+    const placedTables = new Set();
+    function buildCompactTable(ti) {
+      const tbl = sectionTables[ti];
+      if (!tbl || placedTables.has(ti)) return null;
+      const rowCount = tbl.rows ? tbl.rows.length : 0;
+      if (rowCount === 0) return null;
+      placedTables.add(ti);
+      const tblDetails = el('details', 'table-collapse');
+      tblDetails.setAttribute('data-collapsible', 'table');
+      const tblSummary = el('summary', 'table-collapse__summary');
+      const limit = tbl.rowLimit || 20;
+      tblSummary.textContent = honestTableTitle(tbl.title || 'Table', rowCount, tbl.totalRows) + ' \u2014 ' + tableRowCountText(rowCount, tbl.totalRows, tbl.sampled);
+      tblDetails.appendChild(tblSummary);
+      if (tbl.headers && tbl.headers.length) {
+        const tableId = 'detail-table-' + sectionIndexKey + '-' + ti;
+        const shouldLazyHydrate = rowCount > 180;
+        const tools = el('div', 'table-tools');
+        const search = document.createElement('input');
+        search.type = 'search';
+        search.className = 'table-filter-input';
+        search.placeholder = 'Filter table rows...';
+        search.setAttribute('aria-label', 'Filter table rows');
+        search.setAttribute('data-target-table', tableId);
+        tools.appendChild(search);
 
-          const count = el('span', 'table-tools__count');
-          count.setAttribute('data-target-table-count', tableId);
-          count.textContent = rowCount + ' rows';
-          tools.appendChild(count);
+        const count = el('span', 'table-tools__count');
+        count.setAttribute('data-target-table-count', tableId);
+        count.textContent = rowCount + ' rows';
+        tools.appendChild(count);
 
-          const exportBtn = el('button', 'action-btn table-export-csv');
-          exportBtn.type = 'button';
-          exportBtn.setAttribute('data-target-table', tableId);
-          exportBtn.setAttribute('data-title', tbl.title || 'table');
-          exportBtn.textContent = 'CSV';
-          exportBtn.title = 'Download every row of this table matching the filter, in the current order, as shown';
-          tools.appendChild(exportBtn);
+        const exportBtn = el('button', 'action-btn table-export-csv');
+        exportBtn.type = 'button';
+        exportBtn.setAttribute('data-target-table', tableId);
+        exportBtn.setAttribute('data-title', tbl.title || 'table');
+        exportBtn.textContent = 'CSV';
+        exportBtn.title = 'Download every row of this table matching the filter, in the current order, as shown';
+        tools.appendChild(exportBtn);
 
-          const pageSizeOptions = [10, 20, 50, 100, 'all'];
-          if (rowCount > pageSizeOptions[0]) {
-            const pagination = el('div', 'table-pagination');
-            pagination.setAttribute('data-target-table', tableId);
+        const pageSizeOptions = [10, 20, 50, 100, 'all'];
+        if (rowCount > pageSizeOptions[0]) {
+          const pagination = el('div', 'table-pagination');
+          pagination.setAttribute('data-target-table', tableId);
 
-            const sizeLabel = document.createElement('label');
-            sizeLabel.className = 'table-pagination__size-label';
-            sizeLabel.textContent = 'Rows per page';
-            const sizeSelect = document.createElement('select');
-            sizeSelect.className = 'table-page-size-select';
-            sizeSelect.setAttribute('data-target-table', tableId);
-            sizeSelect.setAttribute('aria-label', 'Rows per page');
-            for (let oi = 0; oi < pageSizeOptions.length; oi++) {
-              const opt = document.createElement('option');
-              opt.value = String(pageSizeOptions[oi]);
-              opt.textContent = pageSizeOptions[oi] === 'all' ? 'All' : String(pageSizeOptions[oi]);
-              if (pageSizeOptions[oi] === limit) opt.selected = true;
-              sizeSelect.appendChild(opt);
-            }
-            sizeLabel.appendChild(sizeSelect);
-            pagination.appendChild(sizeLabel);
-
-            const prevBtn = document.createElement('button');
-            prevBtn.type = 'button';
-            prevBtn.className = 'action-btn table-page-prev-btn';
-            prevBtn.setAttribute('data-target-table', tableId);
-            prevBtn.textContent = 'Prev';
-            pagination.appendChild(prevBtn);
-
-            const pageIndicator = el('span', 'table-pagination__indicator');
-            pageIndicator.setAttribute('data-target-table-page', tableId);
-            pagination.appendChild(pageIndicator);
-
-            const nextBtn = document.createElement('button');
-            nextBtn.type = 'button';
-            nextBtn.className = 'action-btn table-page-next-btn';
-            nextBtn.setAttribute('data-target-table', tableId);
-            nextBtn.textContent = 'Next';
-            pagination.appendChild(nextBtn);
-
-            tools.appendChild(pagination);
-
-            const printNote = el('div', 'table-print-note');
-            printNote.textContent = 'Print/export summary: table body omitted. Showing summary only for ' + rowCount + ' rows.';
-            tblDetails.appendChild(printNote);
+          const sizeLabel = document.createElement('label');
+          sizeLabel.className = 'table-pagination__size-label';
+          sizeLabel.textContent = 'Rows per page';
+          const sizeSelect = document.createElement('select');
+          sizeSelect.className = 'table-page-size-select';
+          sizeSelect.setAttribute('data-target-table', tableId);
+          sizeSelect.setAttribute('aria-label', 'Rows per page');
+          for (let oi = 0; oi < pageSizeOptions.length; oi++) {
+            const opt = document.createElement('option');
+            opt.value = String(pageSizeOptions[oi]);
+            opt.textContent = pageSizeOptions[oi] === 'all' ? 'All' : String(pageSizeOptions[oi]);
+            if (pageSizeOptions[oi] === limit) opt.selected = true;
+            sizeSelect.appendChild(opt);
           }
-          tblDetails.appendChild(tools);
+          sizeLabel.appendChild(sizeSelect);
+          pagination.appendChild(sizeLabel);
 
-          if (!explicitTopTypesChart) {
-            const treemap = buildTopTypesTreemap(tbl);
-            if (treemap) tblDetails.appendChild(treemap);
-          }
+          const prevBtn = document.createElement('button');
+          prevBtn.type = 'button';
+          prevBtn.className = 'action-btn table-page-prev-btn';
+          prevBtn.setAttribute('data-target-table', tableId);
+          prevBtn.textContent = 'Prev';
+          pagination.appendChild(prevBtn);
 
-          const tblWrap = el('div', 'table-wrap');
-          const tableEl = document.createElement('table');
-          tableEl.id = tableId;
-          tableEl.classList.add('detail-filterable-table');
-          tableEl.dataset.responsiveStack = '1';
-          tableEl.dataset.pageSize = String(limit > 0 ? limit : 'all');
-          tableEl.dataset.page = '1';
-          tableEl.dataset.hydrated = '0';
-          tableEl.dataset.lazyHydrate = shouldLazyHydrate ? '1' : '0';
-          const thead = document.createElement('thead');
-          const hrow = document.createElement('tr');
-          for (let hi = 0; hi < tbl.headers.length; hi++) {
-            const th = document.createElement('th'); th.textContent = tbl.headers[hi]; hrow.appendChild(th);
-          }
-          thead.appendChild(hrow); tableEl.appendChild(thead);
-          const tbody = document.createElement('tbody');
-          tbody.dataset.lazyBody = shouldLazyHydrate ? '1' : '0';
-          // attach header metadata (if present) to the table element for use during hydration/sorting
-          tableEl._headerMeta = tbl.headerMeta || null;
-          const allRows = tbl.rows || [];
+          const pageIndicator = el('span', 'table-pagination__indicator');
+          pageIndicator.setAttribute('data-target-table-page', tableId);
+          pagination.appendChild(pageIndicator);
 
-          const buildRow = function (dataRow, ri) {
-            const tr = document.createElement('tr');
-            tr.dataset.rowIndex = String(ri);
-            const cells = Array.isArray(dataRow)
-              ? dataRow
-              : (dataRow && Array.isArray(dataRow.cells) ? dataRow.cells : []);
-            for (let ci = 0; ci < cells.length; ci++) {
-              const meta = tableEl._headerMeta && tableEl._headerMeta[ci] ? tableEl._headerMeta[ci] : null;
-              tr.appendChild(buildTableCell(cells[ci], String(tbl.headers[ci] || ('Column ' + (ci + 1))), meta));
-            }
-            return tr;
-          };
+          const nextBtn = document.createElement('button');
+          nextBtn.type = 'button';
+          nextBtn.className = 'action-btn table-page-next-btn';
+          nextBtn.setAttribute('data-target-table', tableId);
+          nextBtn.textContent = 'Next';
+          pagination.appendChild(nextBtn);
 
-          function hydrateRows() {
-            if (tableEl.dataset.hydrated === '1') return;
-            if (shouldLazyHydrate) {
-              // A large table keeps its rows as data and draws one page at a time, so the DOM never holds the other rows
-              // (docs/ReportStructure/m4-payload-plan.md, D1a); sort and filter work over the data, not the page.
-              attachPagedTable(tableEl, tbody, {
-                rows: allRows,
-                headerMeta: tableEl._headerMeta || [],
-                buildRow: buildRow,
-                cellText: cellDisplayText,
-                sortValue: cellSortValue,
-              });
-              tableEl.dataset.hydrated = '1';
-              return;
-            }
-            for (let ri = 0; ri < allRows.length; ri++) {
-              const tr = buildRow(allRows[ri], ri);
-              if (limit > 0 && rowCount > limit && ri >= limit) tr.hidden = true;
-              tbody.appendChild(tr);
-            }
+          tools.appendChild(pagination);
 
-            tableEl.dataset.hydrated = '1';
-            if (typeof tableEl.__applyManagedState === 'function') {
-              tableEl.__applyManagedState();
-            }
-          }
-
-          // A large table attaches its data when opened; a search over the report asks for it earlier, which only builds one page of rows.
-          tableEl.__hydrateRows = hydrateRows;
-
-          if (shouldLazyHydrate && !tblDetails.open) {
-            const hint = el('div', 'table-lazy-hint');
-            hint.textContent = 'Rows render on expand to keep initial view responsive.';
-            tblDetails.appendChild(hint);
-            const onToggle = function () {
-              if (!tblDetails.open) return;
-              hydrateRows();
-              hint.remove();
-              tblDetails.removeEventListener('toggle', onToggle);
-            };
-            tblDetails.addEventListener('toggle', onToggle);
-          } else {
-            hydrateRows();
-          }
-
-          tableEl.appendChild(tbody);
-          tblWrap.appendChild(tableEl); tblDetails.appendChild(tblWrap);
+          const printNote = el('div', 'table-print-note');
+          printNote.textContent = 'Print/export summary: table body omitted. Showing summary only for ' + rowCount + ' rows.';
+          tblDetails.appendChild(printNote);
         }
-        content.appendChild(tblDetails);
+        tblDetails.appendChild(tools);
+
+        if (!explicitTopTypesChart) {
+          const treemap = buildTopTypesTreemap(tbl);
+          if (treemap) tblDetails.appendChild(treemap);
+        }
+
+        const tblWrap = el('div', 'table-wrap');
+        const tableEl = document.createElement('table');
+        tableEl.id = tableId;
+        tableEl.classList.add('detail-filterable-table');
+        const isTimeline = isTimelineTable(tbl);
+        if (isTimeline) {
+          tableEl.classList.add('detail-table--timeline');
+          tblWrap.classList.add('table-with-pagination--timeline');
+        }
+        tableEl.dataset.responsiveStack = '1';
+        tableEl.dataset.pageSize = String(limit > 0 ? limit : 'all');
+        tableEl.dataset.page = '1';
+        tableEl.dataset.hydrated = '0';
+        tableEl.dataset.lazyHydrate = shouldLazyHydrate ? '1' : '0';
+        const thead = document.createElement('thead');
+        const hrow = document.createElement('tr');
+        for (let hi = 0; hi < tbl.headers.length; hi++) {
+          const th = document.createElement('th'); th.textContent = tbl.headers[hi]; hrow.appendChild(th);
+        }
+        thead.appendChild(hrow); tableEl.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        tbody.dataset.lazyBody = shouldLazyHydrate ? '1' : '0';
+        // attach header metadata (if present) to the table element for use during hydration/sorting
+        tableEl._headerMeta = tbl.headerMeta || null;
+        const allRows = tbl.rows || [];
+
+        const buildRow = function (dataRow, ri) {
+          const tr = document.createElement('tr');
+          tr.dataset.rowIndex = String(ri);
+          const cells = Array.isArray(dataRow)
+            ? dataRow
+            : (dataRow && Array.isArray(dataRow.cells) ? dataRow.cells : []);
+          for (let ci = 0; ci < cells.length; ci++) {
+            const meta = tableEl._headerMeta && tableEl._headerMeta[ci] ? tableEl._headerMeta[ci] : null;
+            const td = buildTableCell(cells[ci], String(tbl.headers[ci] || ('Column ' + (ci + 1))), meta);
+            if (isTimeline) styleTimelineCell(td, ci, cells.length);
+            tr.appendChild(td);
+          }
+          if (isTimeline) applyTimelineRowVisualEncoding(tr, cells.length);
+          return tr;
+        };
+
+        function hydrateRows() {
+          if (tableEl.dataset.hydrated === '1') return;
+          if (shouldLazyHydrate) {
+            // A large table keeps its rows as data and draws one page at a time, so the DOM never holds the other rows
+            // (docs/ReportStructure/m4-payload-plan.md, D1a); sort and filter work over the data, not the page.
+            attachPagedTable(tableEl, tbody, {
+              rows: allRows,
+              headerMeta: tableEl._headerMeta || [],
+              buildRow: buildRow,
+              cellText: cellDisplayText,
+              sortValue: cellSortValue,
+            });
+            tableEl.dataset.hydrated = '1';
+            return;
+          }
+          for (let ri = 0; ri < allRows.length; ri++) {
+            const tr = buildRow(allRows[ri], ri);
+            if (limit > 0 && rowCount > limit && ri >= limit) tr.hidden = true;
+            tbody.appendChild(tr);
+          }
+
+          tableEl.dataset.hydrated = '1';
+          if (typeof tableEl.__applyManagedState === 'function') {
+            tableEl.__applyManagedState();
+          }
+        }
+
+        // A large table attaches its data when opened; a search over the report asks for it earlier, which only builds one page of rows.
+        tableEl.__hydrateRows = hydrateRows;
+
+        if (shouldLazyHydrate && !tblDetails.open) {
+          const hint = el('div', 'table-lazy-hint');
+          hint.textContent = 'Rows render on expand to keep initial view responsive.';
+          tblDetails.appendChild(hint);
+          const onToggle = function () {
+            if (!tblDetails.open) return;
+            hydrateRows();
+            hint.remove();
+            tblDetails.removeEventListener('toggle', onToggle);
+          };
+          tblDetails.addEventListener('toggle', onToggle);
+        } else {
+          hydrateRows();
+        }
+
+        tableEl.appendChild(tbody);
+        tblWrap.appendChild(tableEl); tblDetails.appendChild(tblWrap);
       }
+      return tblDetails;
+    }
+
+    if (blocksWaitForSegment) renderBlocks(section.blocks || [], content, undefined, { renderTableRef: buildCompactTable });
+    for (let ti = 0; ti < sectionTables.length; ti++) {
+      const tableDetails = buildCompactTable(ti);
+      if (tableDetails) content.appendChild(tableDetails);
     }
 
     // ── StackTraces slot ──────────────────────────────────────────────────────
@@ -1064,6 +1080,13 @@ function honestTableTitle(title, rowCount, totalRows) {
   return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
+// A table of one metric across the dumps (Metric, Trend, a column per dump, deltas, Pattern, Status): the trend metric timeline.
+function isTimelineTable(tbl) {
+  const headers = (tbl.headers || []).map(function (h) { return String(h || '').toLowerCase(); });
+  return String(tbl.title || '').toLowerCase().includes('metric timeline')
+    || (headers.length >= 6 && headers[0] === 'metric' && headers.includes('pattern') && headers.includes('status'));
+}
+
 // "N rows", "N of M shown" when the analyzer cut the list, "N sampled from M" when the rows are a sample of a larger population.
 function tableRowCountText(rowCount, totalRows, sampled) {
   const rows = rowCount.toLocaleString('en-US') + ' row' + (rowCount !== 1 ? 's' : '');
@@ -1075,6 +1098,10 @@ function tableRowCountText(rowCount, totalRows, sampled) {
 // What a table cell shows and sorts by. A numeric column shows its value compactly (bytes, percent); anything else shows its text.
 function computeCell(cellData, meta) {
   const display = extractCellDisplay(cellData);
+  // A record with display text and a raw value (a trend timeline cell) shows its text and sorts and encodes by the value.
+  if (cellData && typeof cellData === 'object' && typeof cellData.display === 'string' && cellData.rawValue != null && Number.isFinite(Number(cellData.rawValue))) {
+    return { text: cellData.display, numeric: Number(cellData.rawValue) };
+  }
   try {
     let numeric = null;
     if (meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format)) {
@@ -1107,7 +1134,20 @@ function buildTableCell(cellData, columnLabel, meta) {
   td.dataset.colLabel = columnLabel;
   const cell = computeCell(cellData, meta);
   if (cell.numeric != null) td.dataset.value = String(cell.numeric);
+  // A trend cell is drawn from its payload by renderSparklines.
+  if (cell.text.startsWith('__SPARK__')) {
+    td.setAttribute('data-sparkline', cell.text.substring('__SPARK__'.length));
+    return td;
+  }
   td.textContent = cell.text;
+  if (cellData && typeof cellData === 'object' && cellData.linkTarget) {
+    const jump = document.createElement('a');
+    jump.className = 'trend-jump';
+    jump.href = '#' + cellData.linkTarget;
+    jump.setAttribute('aria-label', 'Jump to section');
+    jump.textContent = ' \u21B3';
+    td.appendChild(jump);
+  }
   if (cellData && cellData.entityId != null) decorateEntityCell(td, cellData.entityId, td.textContent);
   const unknown = unknownCell(cellData);
   if (unknown) {

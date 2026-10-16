@@ -45,18 +45,14 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         };
 
         docForClient = EntityCellPass.Apply(docForClient);
+        // A trend report's own sections are not pooled: the viewer has one string pool for the whole page, and the per-dump documents embedded beside
+        // them are serialized without one, so a pool would make it read numbers in their string columns as pool indexes.
         (IReadOnlyList<ReportDomainSection>? pooledDomains,
-            IReadOnlyList<AnalyzerDetailSection>? pooledTrendSections,
-            IReadOnlyList<string>? stringPool) = ReportStringPool.Apply(
-                docForClient.Domains,
-                (docForClient as TrendReportDocument)?.TrendAnalyzerSections);
+            IReadOnlyList<AnalyzerDetailSection>? _,
+            IReadOnlyList<string>? stringPool) = ReportStringPool.Apply(docForClient.Domains, null);
 
         if (stringPool != null)
-        {
             docForClient = docForClient with { Domains = pooledDomains, Strings = stringPool };
-            if (docForClient is TrendReportDocument pooledTrendDoc && pooledTrendSections != null)
-                docForClient = pooledTrendDoc with { TrendAnalyzerSections = pooledTrendSections };
-        }
 
         docForClient = docForClient with { Domains = EventLeakSubscriberPool.Apply(docForClient.Domains) };
         if (docForClient is TrendReportDocument trendForSubscriberPool)

@@ -3,9 +3,11 @@ import { el, nvl } from './report.dom.js';
 
 // ── DOM-based sparkline rendering (post-render pass over td[data-sparkline] cells) ──
 
-export function renderSparklines() {
-  const tds = document.querySelectorAll('td[data-sparkline]');
+// Draws every sparkline cell under root (the whole page by default) that has not been drawn yet.
+export function renderSparklines(root) {
+  const tds = (root || document).querySelectorAll('td[data-sparkline]');
   for (const td of tds) {
+    if (td.querySelector('svg')) continue;
     try {
       const payload = JSON.parse(td.getAttribute('data-sparkline'));
       const values = (payload && payload.values) || [];

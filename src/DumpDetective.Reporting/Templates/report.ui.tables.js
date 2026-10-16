@@ -1,3 +1,5 @@
+import { renderSparklines } from './report.renderers.charts.js';
+
 function applyTableCellClamp(scope) {
   const root = scope || document;
   const cells = root.querySelectorAll('td');
@@ -204,6 +206,7 @@ function applyPagedTableState(tbl) {
   const rows = paged.model.rows;
   for (let i = window_.start; i < Math.min(window_.end, matched.length); i++) fragment.appendChild(paged.model.buildRow(rows[matched[i]], matched[i]));
   paged.tbody.replaceChildren(fragment);
+  renderSparklines(paged.tbody);
   updatePagerUi(tbl, matched.length, window_, query, pageSizeRaw);
   applyTableCellClamp(tbl);
 }

@@ -72,6 +72,7 @@ internal static class TrendMetricTimelineSectionBuilder
                 orderedDomains.Add(d);
         }
 
+        var tables = new List<CompactTable>();
         bool firstDomain = true;
         foreach (string domain in orderedDomains)
         {
@@ -108,6 +109,7 @@ internal static class TrendMetricTimelineSectionBuilder
                     {
                         AddTimelineTableBlock(
                             blocks,
+                            tables,
                             snapshots,
                             $"{analyzerName} metric timeline",
                             rows,
@@ -139,6 +141,7 @@ internal static class TrendMetricTimelineSectionBuilder
 
                         AddTimelineTableBlock(
                             blocks,
+                            tables,
                             snapshots,
                             BuildMetricTableCaption(analyzerName, metricGroup.Key, scoped: true),
                             rows,
@@ -154,7 +157,8 @@ internal static class TrendMetricTimelineSectionBuilder
             SortOrder:    40,
             Blocks:       blocks,
             SectionId:    "T4",
-            Domain:       "Trend");
+            Domain:       "Trend",
+            CompactTables: tables.Count > 0 ? tables : null);
     }
 
     private static string BuildMetricTableCaption(string analyzerName, string metricKey, bool scoped)
@@ -207,6 +211,7 @@ internal static class TrendMetricTimelineSectionBuilder
 
     private static void AddTimelineTableBlock(
         List<SectionBlock> blocks,
+        List<CompactTable> tables,
         IReadOnlyList<AnalysisSnapshot> snapshots,
         string caption,
         IReadOnlyList<TableRow> rows,
@@ -215,27 +220,33 @@ internal static class TrendMetricTimelineSectionBuilder
         if (blocks.Count > 0)
             blocks.Add(new BlankBlock());
 
-        var headers = new List<string>(6 + snapshots.Count)
+        var headers = new List<CompactHeader>(6 + snapshots.Count)
         {
-            firstColumnHeader,
-            $"Trend ({snapshots.Count})"
+            new(firstColumnHeader, "string"),
+            // The trend cell is drawn from its payload and has no text to sort by.
+            new($"Trend ({snapshots.Count})", "string", null, Sortable: false),
         };
 
+        // Dump, delta and status cells carry the text to show and a number to sort by, so their columns are numeric.
         for (int i = 0; i < snapshots.Count; i++)
-        {
-            headers.Add($"Dump {i + 1}");
-        }
+            headers.Add(new CompactHeader($"Dump {i + 1}", "number"));
 
-        headers.Add("Δ");
-        headers.Add("Δ%");
-        headers.Add("Pattern");
-        headers.Add("Status");
+        headers.Add(new CompactHeader("Δ", "number"));
+        headers.Add(new CompactHeader("Δ%", "number"));
+        headers.Add(new CompactHeader("Pattern", "string"));
+        headers.Add(new CompactHeader("Status", "number"));
 
-        blocks.Add(new TableBlock(
-            Caption: caption,
-            Headers: headers,
-            Rows: rows));
+        var compactRows = new List<CompactRow>(rows.Count);
+        foreach (TableRow row in rows)
+            compactRows.Add(new CompactRow(row.Cells.Select(ToCompactCell).ToArray()));
+
+        tables.Add(new CompactTable(caption, headers, compactRows));
+        blocks.Add(new CompactTableRefBlock(tables.Count - 1));
     }
+
+    // A cell with only text is that text; one with a sort value or a jump link keeps its record, which the viewer reads (display, rawValue, linkTarget).
+    private static object ToCompactCell(TableCell cell) =>
+        cell.RawValue is null && cell.LinkTarget is null && cell.Unknown is null ? cell.Display : cell;
 
     private static List<TableRow> BuildRows(
         string analyzerName,

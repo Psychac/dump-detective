@@ -11,6 +11,7 @@ import { decorateEntityCell } from './report.renderers.entities.js';
 import { confidenceSlots } from './report.renderers.shared.js';
 import { loadSectionSegment, loadEntities } from './report.segments.js';
 import { attachPagedTable } from './report.ui.tables.js';
+import { renderSparklines, renderCharts } from './report.renderers.charts.js';
 
 // Resolves pooled-string cells (see report.renderers.shared.js) back to their literal value.
 // Only non-numeric columns can contain pooled indices — the producer never pools a cell in a
@@ -356,12 +357,16 @@ export function buildAnalyzerSection(section, i) {
     content.appendChild(strip);
   }
 
-  // Narrative blocks from blocks.js
-  renderBlocks(blocks, content);
+  // Narrative blocks from blocks.js. A lazy section whose table blocks arrive without rows builds them with the rest of its body, after its
+  // segment has loaded (see loadSectionSegment).
+  const blocksWaitForSegment = !!section.segmentId && blocks.some(function (b) { return b && b.type === 'table' && (!b.rows || !b.rows.length); });
+  if (!blocksWaitForSegment) renderBlocks(blocks, content);
 
   // Everything below the narrative blocks (tables and typed slots) is built by this function: at once for a section whose content is in the
   // core, or after its segment has loaded for a section whose content ships as a lazy segment (docs/ReportStructure/m4-payload-plan.md, D11).
   function renderSectionBody() {
+    if (blocksWaitForSegment) renderBlocks(section.blocks || [], content);
+
     // ── Typed section tables (collapsed by default) ──────────────────────────
     const sectionTables = Array.isArray(section.compactTables) ? section.compactTables.map(function (ct) {
       const headers = Array.isArray(ct.headers) ? ct.headers.map(function (h) { return (h && h.name) ? String(h.name) : String(h || ''); }) : [];
@@ -1128,6 +1133,9 @@ function attachLazySectionBody(section, details, content, wrapper, renderBody) {
       if (sectionHasEntityColumns(section)) await loadEntities();
       status.remove();
       renderBody();
+      // The startup pass that draws sparklines and charts ran before this body existed.
+      renderSparklines();
+      renderCharts();
       wrapper.dataset.lazyBody = 'loaded';
       document.dispatchEvent(new CustomEvent('dumpdetective:section-body-rendered', { detail: { wrapper: wrapper } }));
     } catch (err) {

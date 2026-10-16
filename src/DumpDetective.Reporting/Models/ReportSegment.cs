@@ -19,6 +19,7 @@ internal sealed record SegmentedReport(AnalysisReportDocument Core, IReadOnlyLis
 /// lazy-row threshold appears here as a stub (<see cref="CompactTable.RowCount"/> and <see cref="CompactTable.SegmentId"/>, no rows).
 /// </summary>
 internal sealed record SectionSegmentPayload(
+    IReadOnlyList<BlockTableRows>? BlockTableRows,
     IReadOnlyList<CompactTable>? CompactTables,
     IReadOnlyList<NamedStackTrace>? StackTraces,
     IReadOnlyList<RootOwnedSubgraphGroup>? RootOwnedSubgraphGroups,
@@ -30,6 +31,9 @@ internal sealed record SectionSegmentPayload(
     IReadOnlyList<StackCluster>? StackClusters,
     IReadOnlyList<AnalyzerArtifact>? Artifacts,
     IReadOnlyList<TreeWidget>? TreeWidgets);
+
+/// <summary>The rows of one legacy table block of a section, by the block's index in the section's block list; the core keeps the block with no rows.</summary>
+internal sealed record BlockTableRows(int BlockIndex, IReadOnlyList<TableRow> Rows);
 
 /// <summary>The dossier panel's data, loaded together when a dossier first opens.</summary>
 internal sealed record EntityDossierPayload(EntitySummary? EntitySummary, EntityRelations? Relations);

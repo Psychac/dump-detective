@@ -22,14 +22,22 @@ internal static class ReportSegmenter
 
     public static SegmentedReport Segment(AnalysisReportDocument document)
     {
-        if (document is TrendReportDocument)
-            return new SegmentedReport(document, []);
-
         var segments = new List<ReportSegment>();
         var usedIds = new HashSet<string>(StringComparer.Ordinal);
 
         IReadOnlyList<ReportDomainSection>? domains = document.Domains is null ? null : SegmentDomains(document.Domains, segments, usedIds);
         AnalysisReportDocument core = document with { Domains = domains };
+
+        // A trend report's own sections (the metric timeline above all) hold their data in table blocks and are segmented the same way. Its per-dump
+        // documents are embedded separately and are not segmented yet.
+        if (core is TrendReportDocument trend && trend.TrendAnalyzerSections.Count > 0)
+        {
+            var trendSections = new List<AnalyzerDetailSection>(trend.TrendAnalyzerSections.Count);
+            foreach (AnalyzerDetailSection section in trend.TrendAnalyzerSections)
+                trendSections.Add(SegmentSection(section, segments, usedIds));
+
+            core = trend with { TrendAnalyzerSections = trendSections };
+        }
 
         if (document.Entities is not null)
         {
@@ -70,7 +78,25 @@ internal static class ReportSegmenter
 
         string sectionPart = UniqueId(string.IsNullOrEmpty(section.SectionId) ? "section" : section.SectionId, usedIds);
         string segmentId = "s-" + sectionPart;
+        List<BlockTableRows>? blockTableRows = null;
+        IReadOnlyList<SectionBlock> coreBlocks = section.Blocks;
+        for (int i = 0; i < section.Blocks.Count; i++)
+        {
+            if (section.Blocks[i] is not TableBlock { Rows.Count: > 0 } tableBlock)
+                continue;
+
+            if (blockTableRows is null)
+            {
+                blockTableRows = [];
+                coreBlocks = section.Blocks.ToList();
+            }
+
+            blockTableRows.Add(new BlockTableRows(i, tableBlock.Rows));
+            ((List<SectionBlock>)coreBlocks)[i] = tableBlock with { Rows = [] };
+        }
+
         var payload = new SectionSegmentPayload(
+            blockTableRows,
             section.CompactTables is null ? null : SegmentTables(section.CompactTables, sectionPart, segments, usedIds),
             section.StackTraces,
             section.RootOwnedSubgraphGroups,
@@ -86,6 +112,7 @@ internal static class ReportSegmenter
         segments.Add(new ReportSegment(segmentId, ReportSegmentKind.Section, Serialize(payload)));
         return section with
         {
+            Blocks = coreBlocks,
             CompactTables = null,
             StackTraces = null,
             RootOwnedSubgraphGroups = null,
@@ -123,7 +150,8 @@ internal static class ReportSegmenter
     }
 
     private static bool HasLazyContent(AnalyzerDetailSection section) =>
-        section.CompactTables is { Count: > 0 }
+        section.Blocks.Any(block => block is TableBlock { Rows.Count: > 0 })
+        || section.CompactTables is { Count: > 0 }
         || section.StackTraces is { Count: > 0 }
         || section.RootOwnedSubgraphGroups is { Count: > 0 }
         || section.TypeTraces is { Count: > 0 }

@@ -176,15 +176,61 @@ public sealed class ReportSegmenterTests
         original.SegmentId.Should().BeNull();
     }
 
-    [Fact]
-    public void Segment_TrendReport_IsReturnedUnchanged()
+    private static TrendReportDocument TrendWithATimelineSection(int rows)
     {
-        var trend = new TrendReportDocument();
+        var tableBlock = new TableBlock("Metric timeline", ["Metric", "Dump 1"], Enumerable.Range(0, rows).Select(i => new TableRow([new TableCell($"m{i}"), new TableCell("1", 1)])).ToArray());
+        var section = new AnalyzerDetailSection("Trend", "Metric Timeline", 0, [new TextBlock("intro"), new HeadingBlock("Heading", 0), tableBlock], "T4");
+        return new TrendReportDocument { TrendAnalyzerSections = [section] };
+    }
 
-        SegmentedReport segmented = ReportSegmenter.Segment(trend);
+    [Fact]
+    public void Segment_TrendReportWithNothingToSegment_HasNoSegments()
+    {
+        SegmentedReport segmented = ReportSegmenter.Segment(new TrendReportDocument());
 
-        segmented.Core.Should().BeSameAs(trend);
+        segmented.Core.Should().BeOfType<TrendReportDocument>();
         segmented.Segments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Segment_TrendSection_MovesTableBlockRowsOutAndKeepsTheBlocksInTheCore()
+    {
+        SegmentedReport segmented = ReportSegmenter.Segment(TrendWithATimelineSection(rows: 500));
+
+        AnalyzerDetailSection core = ((TrendReportDocument)segmented.Core).TrendAnalyzerSections.Single();
+        core.SegmentId.Should().Be("s-T4");
+        core.Blocks.Should().HaveCount(3);
+        core.Blocks[1].Should().Be(new HeadingBlock("Heading", 0));
+        ((TableBlock)core.Blocks[2]).Rows.Should().BeEmpty();
+        ((TableBlock)core.Blocks[2]).Headers.Should().Equal("Metric", "Dump 1");
+
+        JsonElement payload = Parse(segmented.Segments.Single(segment => segment.Id == "s-T4"));
+        JsonElement entry = payload.GetProperty("blockTableRows")[0];
+        entry.GetProperty("blockIndex").GetInt32().Should().Be(2);
+        entry.GetProperty("rows").GetArrayLength().Should().Be(500);
+        entry.GetProperty("rows")[3].GetProperty("cells")[0].GetProperty("display").GetString().Should().Be("m3");
+    }
+
+    [Fact]
+    public void Segment_TrendSectionWithoutTableBlocks_StaysInTheCore()
+    {
+        var section = new AnalyzerDetailSection("Trend", "Overview", 0, [new TextBlock("only prose")], "T5");
+        SegmentedReport segmented = ReportSegmenter.Segment(new TrendReportDocument { TrendAnalyzerSections = [section] });
+
+        ((TrendReportDocument)segmented.Core).TrendAnalyzerSections.Single().Should().BeSameAs(section);
+        segmented.Segments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Segment_TrendReport_DoesNotMutateTheInputSection()
+    {
+        TrendReportDocument trend = TrendWithATimelineSection(rows: 5);
+        TableBlock original = (TableBlock)trend.TrendAnalyzerSections[0].Blocks[2];
+
+        ReportSegmenter.Segment(trend);
+
+        original.Rows.Should().HaveCount(5);
+        trend.TrendAnalyzerSections[0].SegmentId.Should().BeNull();
     }
 
     [Fact]

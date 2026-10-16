@@ -74,6 +74,14 @@ export async function loadSectionSegment(section) {
   const payload = await loadSegment(section.segmentId);
   if (payload) Object.keys(payload).forEach(function (key) { section[key] = payload[key]; });
 
+  // Table blocks arrive from the core without rows; their rows come with the section's segment, by block index.
+  if (Array.isArray(section.blockTableRows) && Array.isArray(section.blocks)) {
+    section.blockTableRows.forEach(function (entry) {
+      if (section.blocks[entry.blockIndex]) section.blocks[entry.blockIndex].rows = entry.rows;
+    });
+    delete section.blockTableRows;
+  }
+
   const stubs = (Array.isArray(section.compactTables) ? section.compactTables : []).filter(function (table) { return table.segmentId; });
   const columnTables = await Promise.all(stubs.map(function (table) { return loadSegment(table.segmentId); }));
   stubs.forEach(function (table, i) {

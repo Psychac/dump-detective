@@ -45,10 +45,14 @@ internal sealed class CompactRowJsonConverter : JsonConverter<CompactRow>
 
     public override void Write(Utf8JsonWriter writer, CompactRow value, JsonSerializerOptions options)
     {
-        writer.WriteStartArray();
+        // An indented writer would put every cell on its own line (and an unknown cell on three); a row is written as one line instead.
+        Utf8JsonWriter target = options.WriteIndented ? InlineJson.Begin(options, elementOf: writer) : writer;
+        target.WriteStartArray();
         foreach (object? cell in value.Values)
-            CompactCellJson.Write(writer, cell, options);
-        writer.WriteEndArray();
+            CompactCellJson.Write(target, cell, options);
+        target.WriteEndArray();
+        if (options.WriteIndented)
+            InlineJson.End(writer);
     }
 }
 

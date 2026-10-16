@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Serialization;
@@ -10,8 +11,14 @@ internal sealed class JsonCanonicalReportFormatter : IReportFormatter
 {
     public ReportFormat Format => ReportFormat.Json;
 
-    // Rely on canonical model attributes for compact JSON naming.
-    private static JsonSerializerOptions Options() => new(ReportJsonContext.Default.Options) { WriteIndented = true };
+    // Rely on canonical model attributes for compact JSON naming. Indented, except that table rows and observation-id lists stay on one line each.
+    private static readonly JsonSerializerOptions IndentedOptions = new(ReportJsonContext.Default.Options)
+    {
+        WriteIndented = true,
+        TypeInfoResolver = ReportJsonContext.Default.WithAddedModifier(InlineJson.InlineObservationIdLists),
+    };
+
+    private static JsonSerializerOptions Options() => IndentedOptions;
 
     public string Render(AnalysisReportDocument doc) =>
         JsonSerializer.Serialize(EntityCellPass.Apply(doc), Options());

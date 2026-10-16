@@ -113,6 +113,17 @@ internal static class ConsoleUx
         SafeMarkupLine($"{IndentSub}[grey]↳  {Escape(phase)}[/]");
     }
 
+    /// <summary>One step of the write stage with how long it took and how much memory the process holds after it, so a slow or failing write can be placed.</summary>
+    public static void OutputStep(string step, TimeSpan duration)
+    {
+        double workingSetGb = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64 / 1073741824.0;
+        lock (_consoleGate)
+        {
+            StopScanLiveIfActive();
+            AnsiConsole.MarkupLine($"{IndentSub}[grey]↳  {Escape(step)}  ·  {Escape(FormatElapsed(duration))}  ·  working set {workingSetGb:F1} GB[/]");
+        }
+    }
+
     /// <summary>
     /// Persists a stage's phase-by-phase timing breakdown (see
     /// <see cref="DumpDetective.Cli.Pipeline.PhaseTimeline"/>) as static lines instead of a live

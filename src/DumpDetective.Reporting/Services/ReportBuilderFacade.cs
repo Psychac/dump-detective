@@ -91,4 +91,13 @@ internal sealed class ReportBuilderFacade(
 
         return formatter.Render(doc);
     }
+
+    /// <summary>Writes <c>report.json</c> to a stream without building it as a string, which fails past about a billion characters.</summary>
+    public Task WriteJsonAsync(AnalysisReportDocument doc, Stream output, CancellationToken cancellationToken)
+    {
+        JsonCanonicalReportFormatter formatter = _formatters.OfType<JsonCanonicalReportFormatter>().FirstOrDefault()
+            ?? throw new InvalidOperationException("No JSON formatter registered.");
+
+        return formatter.WriteAsync(doc, output, cancellationToken);
+    }
 }

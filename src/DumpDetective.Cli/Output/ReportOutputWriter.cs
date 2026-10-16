@@ -6,6 +6,7 @@ using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Diagnostics;
 using DumpDetective.Sdk.Observations;
 
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace DumpDetective.Cli.Output;
@@ -47,26 +48,46 @@ internal sealed class ReportOutputWriter(IEnumerable<IReportSink> sinks)
             string outPath = resolved.OutputPath;
             if (document is not null)
             {
+                var step = Stopwatch.StartNew();
                 if (observations.Count > 0)
                 {
                     ObservationsReference sideCar = await ObservationsSideCarWriter.WriteAsync(
                         outPath, observations, compressed: !resolved.Report.ObservationsUncompressed, cancellationToken);
+                    ConsoleUx.OutputStep($"observations side-car ({observations.Count:N0} observations)", step.Elapsed);
+
+                    step.Restart();
                     IReadOnlyList<EntityRecord>? entities = document is SingleDumpReportDocument
                         ? EntityTableBuilder.Build(observations, document.Findings)
                         : null;
+                    ConsoleUx.OutputStep($"entity table ({entities?.Count ?? 0:N0} entities)", step.Elapsed);
+
+                    step.Restart();
+                    EntitySummary? entitySummary = entities is null ? null : EntitySummaryBuilder.Build(observations, entities, document.Findings);
+                    ConsoleUx.OutputStep("entity summary", step.Elapsed);
+
+                    step.Restart();
+                    EntityRelations? relations = entities is null ? null : EntityRelationBuilder.FromFacts(observations, entities);
+                    ConsoleUx.OutputStep("entity relations", step.Elapsed);
+
                     document = document with
                     {
                         Observations = sideCar,
                         Entities = entities,
-                        EntitySummary = entities is null ? null : EntitySummaryBuilder.Build(observations, entities, document.Findings),
-                        Relations = entities is null ? null : EntityRelationBuilder.FromFacts(observations, entities),
+                        EntitySummary = entitySummary,
+                        Relations = relations,
                     };
                 }
 
+                step.Restart();
                 ReportBrokenEntityReferences(document);
+                ConsoleUx.OutputStep("entity reference check", step.Elapsed);
 
                 foreach (IReportSink sink in _sinks)
+                {
+                    step.Restart();
                     await sink.PublishAsync(resolved, document, cancellationToken);
+                    ConsoleUx.OutputStep($"{sink.Name} output", step.Elapsed);
+                }
             }
 
             if (artifacts is not { Count: > 0 })

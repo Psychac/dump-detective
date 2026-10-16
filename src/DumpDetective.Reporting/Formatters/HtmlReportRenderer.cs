@@ -38,7 +38,6 @@ internal sealed class HtmlReportRenderer : IReportFormatter
 
     public string Render(AnalysisReportDocument doc, HtmlRenderSettings settings)
     {
-        string reportJson = JsonSerializer.Serialize(doc, HtmlEmbeddedReportJson.DocumentTypeInfo);
         AnalysisReportDocument docForClient = doc with
         {
             ReportStyleVersion = settings.StyleVersion == ReportStyleVersion.V2 ? "v2" : "v1"
@@ -74,7 +73,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             segmentElements = encoded.ManifestElement + encoded.SegmentElements;
         }
 
-        reportJson = JsonSerializer.Serialize(segmented.Core, HtmlEmbeddedReportJson.DocumentTypeInfo);
+        string reportJson = JsonSerializer.Serialize(segmented.Core, HtmlEmbeddedReportJson.DocumentTypeInfo);
         reportJson = CompactReportJson(segmented.Core, reportJson);
 
         // For trend reports: serialize each per-dump document independently using the proven

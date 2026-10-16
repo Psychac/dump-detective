@@ -10,7 +10,16 @@ internal sealed class JsonCanonicalReportFormatter : IReportFormatter
 {
     public ReportFormat Format => ReportFormat.Json;
 
+    // Rely on canonical model attributes for compact JSON naming.
+    private static JsonSerializerOptions Options() => new(ReportJsonContext.Default.Options) { WriteIndented = true };
+
     public string Render(AnalysisReportDocument doc) =>
-        // Rely on canonical model attributes for compact JSON naming.
-        JsonSerializer.Serialize(EntityCellPass.Apply(doc), new JsonSerializerOptions(ReportJsonContext.Default.Options) { WriteIndented = true });
+        JsonSerializer.Serialize(EntityCellPass.Apply(doc), Options());
+
+    /// <summary>
+    /// Writes the same JSON as <see cref="Render"/> straight to a stream. A report with millions of table rows is far past the length of
+    /// the longest .NET string, so the file writer must not build the text first.
+    /// </summary>
+    public Task WriteAsync(AnalysisReportDocument doc, Stream output, CancellationToken cancellationToken) =>
+        JsonSerializer.SerializeAsync(output, EntityCellPass.Apply(doc), Options(), cancellationToken);
 }

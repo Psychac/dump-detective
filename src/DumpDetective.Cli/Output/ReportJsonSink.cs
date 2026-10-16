@@ -20,8 +20,21 @@ internal sealed class ReportJsonSink(ReportBuilderFacade reportBuilderFacade) : 
     {
         string reportJsonPath = ReportSiblingPath.For(resolved.OutputPath, Suffix);
 
-        string json = reportBuilderFacade.RenderDocument(document, ReportFormat.Json);
-        await File.WriteAllTextAsync(reportJsonPath, json, cancellationToken);
+        // Written beside the final name and moved into place, so a failure part way never leaves a truncated file that looks like a report.
+        string partialPath = reportJsonPath + ".partial";
+        try
+        {
+            await using (var stream = new FileStream(partialPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 1 << 20, useAsync: true))
+                await reportBuilderFacade.WriteJsonAsync(document, stream, cancellationToken);
+
+            File.Move(partialPath, reportJsonPath, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(partialPath); } catch (IOException) { }
+            throw;
+        }
+
         ConsoleUx.ReportWritten(reportJsonPath);
     }
 }

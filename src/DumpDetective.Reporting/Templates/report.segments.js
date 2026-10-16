@@ -92,12 +92,17 @@ export async function loadSectionSegment(section) {
   delete section.segmentId;
 }
 
-// Every section of the document, for the downloads, which need the whole report.
-export async function loadAllSections(doc) {
+// Every section of the document and, for a trend report, of every per-dump document, for the downloads, which need the whole report.
+export async function loadAllSections(doc, perDumpDocs) {
   const sections = [];
-  (Array.isArray(doc && doc.domains) ? doc.domains : []).forEach(function (domain) {
-    (Array.isArray(domain.sections) ? domain.sections : []).forEach(function (section) { sections.push(section); });
-  });
+  const collect = function (document_) {
+    (Array.isArray(document_ && document_.domains) ? document_.domains : []).forEach(function (domain) {
+      (Array.isArray(domain.sections) ? domain.sections : []).forEach(function (section) { sections.push(section); });
+    });
+  };
+  collect(doc);
+  (Array.isArray(doc && doc.trendAnalyzerSections) ? doc.trendAnalyzerSections : []).forEach(function (section) { sections.push(section); });
+  (Array.isArray(perDumpDocs) ? perDumpDocs : []).forEach(collect);
   await Promise.all(sections.map(loadSectionSegment));
 }
 

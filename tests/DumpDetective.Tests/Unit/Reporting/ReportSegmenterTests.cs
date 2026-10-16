@@ -271,4 +271,52 @@ public sealed class ReportSegmenterTests
         table.TryGetProperty("totalRows", out _).Should().BeFalse();
         table.TryGetProperty("sampled", out _).Should().BeFalse();
     }
+
+    private static TrendReportDocument TrendWithDumps(params SingleDumpReportDocument[] dumps) =>
+        new() { PerDumpDocuments = dumps };
+
+    [Fact]
+    public void Segment_PerDumpDocuments_AreSegmentedWithTheDumpIndexInEveryId()
+    {
+        var trend = TrendWithDumps(Document(Section("A1", TableOfRows("T", 300))), Document(Section("A1", TableOfRows("T", 300))));
+
+        SegmentedReport segmented = ReportSegmenter.Segment(trend);
+
+        segmented.Segments.Select(segment => segment.Id).Should().BeEquivalentTo("s-d0-A1", "t-d0-A1-0", "s-d1-A1", "t-d1-A1-0");
+        var dumps = ((TrendReportDocument)segmented.Core).PerDumpDocuments;
+        dumps.Select(dump => dump.Domains![0].Sections[0].SegmentId).Should().Equal("s-d0-A1", "s-d1-A1");
+        dumps[0].Domains![0].Sections[0].CompactTables.Should().BeNull();
+    }
+
+    [Fact]
+    public void Segment_PerDumpDocument_KeepsItsHeaderFieldsInTheCore()
+    {
+        var dump = Document(Section("A1", TableOfRows("T", 3))) with { DumpPath = "C:/dumps/a.dmp" };
+
+        var core = (TrendReportDocument)ReportSegmenter.Segment(TrendWithDumps(dump)).Core;
+
+        ((SingleDumpReportDocument)core.PerDumpDocuments[0]).DumpPath.Should().Be("C:/dumps/a.dmp");
+        core.PerDumpDocuments[0].Domains![0].Sections[0].DisplayTitle.Should().Be("Title A1");
+    }
+
+    [Fact]
+    public void Segment_PerDumpDocumentWithoutDomains_PassesThrough()
+    {
+        var dump = new SingleDumpReportDocument { DumpPath = "C:/dumps/a.dmp" };
+
+        var core = (TrendReportDocument)ReportSegmenter.Segment(TrendWithDumps(dump)).Core;
+
+        core.PerDumpDocuments[0].Should().BeSameAs(dump);
+    }
+
+    [Fact]
+    public void Segment_TrendSectionAndPerDumpSectionWithTheSameId_GetDistinctSegmentIds()
+    {
+        var trendSection = new AnalyzerDetailSection("Trend", "Timeline", 0, [new TableBlock("t", ["a"], [new TableRow([new TableCell("x")])])], "A1");
+        var trend = new TrendReportDocument { TrendAnalyzerSections = [trendSection], PerDumpDocuments = [Document(Section("A1", TableOfRows("T", 3)))] };
+
+        SegmentedReport segmented = ReportSegmenter.Segment(trend);
+
+        segmented.Segments.Select(segment => segment.Id).Should().OnlyHaveUniqueItems();
+    }
 }

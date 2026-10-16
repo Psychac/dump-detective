@@ -80,7 +80,8 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         // For trend reports: serialize each per-dump document independently using the proven
         // AnalysisReportDocument serializer (same path that produces working single-dump JSON).
         string perDumpJson = "[]";
-        if (doc is TrendReportDocument trend && trend.PerDumpDocuments.Count > 0)
+        // The per-dump documents come from the segmented core, so their sections are stubs with lazy segments.
+        if (segmented.Core is TrendReportDocument trend && trend.PerDumpDocuments.Count > 0)
         {
             var sb = new StringBuilder("[");
             for (int i = 0; i < trend.PerDumpDocuments.Count; i++)

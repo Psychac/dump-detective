@@ -25,7 +25,7 @@ internal static class ReportSegmenter
         var segments = new List<ReportSegment>();
         var usedIds = new HashSet<string>(StringComparer.Ordinal);
 
-        IReadOnlyList<ReportDomainSection>? domains = document.Domains is null ? null : SegmentDomains(document.Domains, segments, usedIds);
+        IReadOnlyList<ReportDomainSection>? domains = document.Domains is null ? null : SegmentDomains(document.Domains, string.Empty, segments, usedIds);
         AnalysisReportDocument core = document with { Domains = domains };
 
         // A trend report's own sections (the metric timeline above all) hold their data in table blocks and are segmented the same way. Its per-dump
@@ -34,9 +34,26 @@ internal static class ReportSegmenter
         {
             var trendSections = new List<AnalyzerDetailSection>(trend.TrendAnalyzerSections.Count);
             foreach (AnalyzerDetailSection section in trend.TrendAnalyzerSections)
-                trendSections.Add(SegmentSection(section, segments, usedIds));
+                trendSections.Add(SegmentSection(section, string.Empty, segments, usedIds));
 
             core = trend with { TrendAnalyzerSections = trendSections };
+        }
+
+        // Each per-dump document is a full single-dump report, so its sections are segmented the same way, with the dump's index in every id
+        // ("s-d1-A5") so the dumps' sections, which share section ids, do not collide. Entity data and the string pool are not segmented here:
+        // a per-dump document is embedded without them.
+        if (core is TrendReportDocument withDumps && withDumps.PerDumpDocuments.Count > 0)
+        {
+            var dumpDocuments = new List<AnalysisReportDocument>(withDumps.PerDumpDocuments.Count);
+            for (int dump = 0; dump < withDumps.PerDumpDocuments.Count; dump++)
+            {
+                AnalysisReportDocument dumpDocument = withDumps.PerDumpDocuments[dump];
+                dumpDocuments.Add(dumpDocument.Domains is null
+                    ? dumpDocument
+                    : dumpDocument with { Domains = SegmentDomains(dumpDocument.Domains, $"d{dump}-", segments, usedIds) });
+            }
+
+            core = withDumps with { PerDumpDocuments = dumpDocuments };
         }
 
         if (document.Entities is not null)
@@ -56,14 +73,14 @@ internal static class ReportSegmenter
     }
 
     private static IReadOnlyList<ReportDomainSection> SegmentDomains(
-        IReadOnlyList<ReportDomainSection> domains, List<ReportSegment> segments, HashSet<string> usedIds)
+        IReadOnlyList<ReportDomainSection> domains, string idScope, List<ReportSegment> segments, HashSet<string> usedIds)
     {
         var result = new List<ReportDomainSection>(domains.Count);
         foreach (ReportDomainSection domain in domains)
         {
             var sections = new List<AnalyzerDetailSection>(domain.Sections.Count);
             foreach (AnalyzerDetailSection section in domain.Sections)
-                sections.Add(SegmentSection(section, segments, usedIds));
+                sections.Add(SegmentSection(section, idScope, segments, usedIds));
 
             result.Add(domain with { Sections = sections });
         }
@@ -71,12 +88,12 @@ internal static class ReportSegmenter
         return result;
     }
 
-    private static AnalyzerDetailSection SegmentSection(AnalyzerDetailSection section, List<ReportSegment> segments, HashSet<string> usedIds)
+    private static AnalyzerDetailSection SegmentSection(AnalyzerDetailSection section, string idScope, List<ReportSegment> segments, HashSet<string> usedIds)
     {
         if (!HasLazyContent(section))
             return section;
 
-        string sectionPart = UniqueId(string.IsNullOrEmpty(section.SectionId) ? "section" : section.SectionId, usedIds);
+        string sectionPart = UniqueId(idScope + (string.IsNullOrEmpty(section.SectionId) ? "section" : section.SectionId), usedIds);
         string segmentId = "s-" + sectionPart;
         List<BlockTableRows>? blockTableRows = null;
         IReadOnlyList<SectionBlock> coreBlocks = section.Blocks;
